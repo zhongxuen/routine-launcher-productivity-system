@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability for the main window. Filesystem access is deliberately NOT granted to the frontend: per development-plan.md section 86 all native OS operations go through explicit Rust commands, not the JS fs plugin.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "notification:default",
+    "dialog:default"
+  ]
+}
