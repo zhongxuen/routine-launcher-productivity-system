@@ -12,11 +12,18 @@
  * for — because the filtering and ordering that decide a view belong to the
  * backend query (development-plan.md sections 14-15), not to the components.
  * `useTaskView` is how a route asks for one.
+ *
+ * Every write also announces itself to the app's other windows — the compact
+ * popup of section 25 is a second webview with its own copy of this store, so
+ * a task ticked off in one has to reach the other. See
+ * `src/lib/window-sync.ts`; the announcement carries no data, only the fact
+ * that a re-read is worth making.
  */
 
 import { create, type StoreApi } from "zustand";
 
 import { todayKey } from "@/lib/task-utils";
+import { announceDataChanged } from "@/lib/window-sync";
 import {
   createTask as createTaskCommand,
   deleteTask as deleteTaskCommand,
@@ -42,6 +49,17 @@ const OPEN_STATUSES: TaskStatus[] = ["todo", "in_progress"];
 
 /** How much completed history the Completed view reads back. */
 const COMPLETED_HISTORY_LIMIT = 200;
+
+/**
+ * How long a revealed task stays called out before the list goes back to
+ * looking like a list.
+ *
+ * Long enough to survive the read that follows a navigation and still be on
+ * screen when the user's eyes arrive; short enough that the highlight is
+ * clearly an answer to something they just did rather than a state the row is
+ * in. It is a pointer, not a selection — nothing else depends on it.
+ */
+const REVEAL_MS = 6_000;
 
 /**
  * The filter behind each view.
@@ -90,6 +108,16 @@ interface TaskState {
   isQuickAddOpen: boolean;
   /** The task the edit dialog is open on, if any. */
   editingTaskId: number | null;
+  /**
+   * The task the user has just been pointed at — a reminder's Start Task
+   * (section 24), and whatever else later needs to say "this one".
+   *
+   * Held here rather than in the route because the row that has to react to
+   * it may not be mounted yet: the reveal is set, the view navigates, the
+   * read lands, and the row highlights itself on mount. It clears itself
+   * after {@link REVEAL_MS}.
+   */
+  revealedTaskId: number | null;
 
   loadView: (view: TaskView) => Promise<void>;
   /** Re-read the current view. Called after every mutation. */
@@ -107,6 +135,8 @@ interface TaskState {
   closeQuickAdd: () => void;
   openTaskEditor: (id: number) => void;
   closeTaskEditor: () => void;
+  /** Call the row out, or pass null to stop. */
+  revealTask: (id: number | null) => void;
 }
 
 /**
@@ -128,6 +158,13 @@ async function syncRecurringTasks(): Promise<void> {
   recurrenceSyncedOn = today;
 }
 
+/**
+ * The timer clearing the current reveal, outside the store because it is
+ * bookkeeping rather than anything rendered — the same reason
+ * `recurrenceSyncedOn` lives out here.
+ */
+let revealTimer: ReturnType<typeof setTimeout> | null = null;
+
 /** Rules keyed by id, so a row can be labelled without a call per task. */
 const byId = (rules: TaskRecurrence[]): Record<number, TaskRecurrence> =>
   Object.fromEntries(rules.map((rule) => [rule.id, rule]));
@@ -141,6 +178,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   error: null,
   isQuickAddOpen: false,
   editingTaskId: null,
+  revealedTaskId: null,
 
   async loadView(view) {
     // Switching views clears the old list rather than showing it under the
@@ -156,12 +194,14 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   async createTask(input) {
     const created = await createTaskCommand(input);
     await get().refresh();
+    announceDataChanged("tasks");
     return created;
   },
 
   async updateTask(id, patch) {
     const updated = await updateTaskCommand(id, patch);
     await get().refresh();
+    announceDataChanged("tasks");
     return updated;
   },
 
@@ -181,6 +221,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   async deleteTask(id) {
     await deleteTaskCommand(id);
     await get().refresh();
+    announceDataChanged("tasks");
   },
 
   setQuickAddOpen: (open) => set({ isQuickAddOpen: open }),
@@ -188,7 +229,23 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   closeQuickAdd: () => set({ isQuickAddOpen: false }),
   openTaskEditor: (id) => set({ editingTaskId: id }),
   closeTaskEditor: () => set({ editingTaskId: null }),
+
+  revealTask: (id) => {
+    if (revealTimer !== null) clearTimeout(revealTimer);
+    revealTimer = null;
+
+    set({ revealedTaskId: id });
+    if (id === null) return;
+
+    revealTimer = setTimeout(() => {
+      revealTimer = null;
+      // A second reveal in the meantime owns the highlight now; clearing it
+      // would put out a light somebody else just turned on.
+      if (get().revealedTaskId === id) set({ revealedTaskId: null });
+    }, REVEAL_MS);
+  },
 }));
+
 
 type Set = StoreApi<TaskState>["setState"];
 type Get = StoreApi<TaskState>["getState"];

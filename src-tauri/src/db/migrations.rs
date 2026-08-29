@@ -30,6 +30,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "0002_seed_task_categories",
         sql: include_str!("../../../database/migrations/0002_seed_task_categories.sql"),
     },
+    Migration {
+        version: 3,
+        name: "0003_focus_session_preset",
+        sql: include_str!("../../../database/migrations/0003_focus_session_preset.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "0004_task_reminders",
+        sql: include_str!("../../../database/migrations/0004_task_reminders.sql"),
+    },
 ];
 
 pub fn run(conn: &Connection) -> rusqlite::Result<()> {

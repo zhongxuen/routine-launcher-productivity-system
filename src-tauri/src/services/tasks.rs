@@ -17,6 +17,8 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, ToS
 use serde::{Deserialize, Serialize};
 
 use super::error::{ServiceError, ServiceResult};
+use super::reminders::{self, TaskReminder};
+use super::routines;
 use super::serde_util::double_option;
 use super::task_recurrence::{self, NewRecurrence};
 use super::validate::{
@@ -61,9 +63,29 @@ const LATEST_IN_SERIES_PREDICATE: &str = "recurrence_id IS NOT NULL AND id = \
      (SELECT MAX(latest.id) FROM tasks AS latest \
        WHERE latest.recurrence_id = tasks.recurrence_id)";
 
-/// Every column of `tasks` plus the computed `days_overdue`, in the order
-/// `Task::from_row` reads them. Built from [`overdue_predicate`] so the
-/// derived flag cannot drift from the views that use the same rule.
+/// The focus time a task has actually had (development-plan.md section 17's
+/// "Actual focus time", section 19's "Focus: 43 minutes"), summed from the
+/// `focus_sessions` rows that name it.
+///
+/// Only *ended* sessions count. A session still on the clock has no
+/// `duration_seconds` yet, and section 88 would rather a task's figure be a
+/// session behind than count minutes nobody has finished focusing.
+///
+/// Derived on every read rather than stored on the task, for the same reason
+/// `days_overdue` is: there is then only one place the number can come from,
+/// so it cannot drift from the sessions it is made of. Deleting a task's
+/// session, or ending one, changes what the next read answers with nothing to
+/// keep in step. Deleting the *task* clears `focus_sessions.task_id`
+/// (`ON DELETE SET NULL`), so the focused time survives in the record even
+/// though the task it was against does not.
+const FOCUS_SECONDS_COLUMN: &str = "COALESCE((SELECT SUM(f.duration_seconds) \
+           FROM focus_sessions AS f \
+          WHERE f.task_id = tasks.id AND f.ended_at IS NOT NULL), 0) AS focus_seconds";
+
+/// Every column of `tasks` plus the computed `days_overdue` and
+/// `focus_seconds`, in the order `Task::from_row` reads them. Built from
+/// [`overdue_predicate`] so the derived flag cannot drift from the views that
+/// use the same rule.
 fn task_columns() -> String {
     format!(
         "id, title, description, status, priority, category_id, due_date, \
@@ -71,8 +93,11 @@ fn task_columns() -> String {
          completed_at, \
          CASE WHEN {} \
               THEN CAST(julianday(date('now', 'localtime')) - julianday(due_date) AS INTEGER) \
-              ELSE 0 END AS days_overdue",
-        overdue_predicate()
+              ELSE 0 END AS days_overdue, \
+         {FOCUS_SECONDS_COLUMN}, \
+         {}",
+        overdue_predicate(),
+        reminders::TASK_COLUMNS
     )
 }
 
@@ -204,14 +229,17 @@ sql_enum!(TaskPriority, "task priority");
 // Payloads
 // ---------------------------------------------------------------------------
 
-/// A task as stored, returned to the frontend verbatim, plus the two derived
-/// `is_overdue`/`days_overdue` fields.
+/// A task as stored, returned to the frontend verbatim, plus the derived
+/// `is_overdue`/`days_overdue`/`focus_seconds` fields.
 ///
-/// Those two are computed by the query against the user's local today rather
-/// than stored, so every read is current and no caller has to do date
-/// arithmetic to find out a task is late. They are a snapshot taken when the
-/// row was read: a list held on screen across midnight needs re-fetching for
-/// them to stay accurate.
+/// The first two are computed by the query against the user's local today
+/// rather than stored, so every read is current and no caller has to do date
+/// arithmetic to find out a task is late. The third is summed from the task's
+/// focus sessions on the same terms (section 19's Task -> Focus Session ->
+/// Completion chain, read back at the Completion end). All three are a
+/// snapshot taken when the row was read: a list held on screen across
+/// midnight — or across a focus session ending — needs re-fetching for them to
+/// stay accurate.
 #[derive(Debug, Clone, Serialize)]
 pub struct Task {
     pub id: i64,
@@ -223,9 +251,11 @@ pub struct Task {
     pub due_date: Option<String>,
     pub due_time: Option<String>,
     pub estimated_minutes: Option<i64>,
-    /// Reserved for the Routine stage; always null for now.
+    /// The routine this task starts with (section 18), or null. Cleared by
+    /// `ON DELETE SET NULL` if the routine is deleted, so a task never points
+    /// at a workspace that is no longer there.
     pub routine_id: Option<i64>,
-    /// Reserved for the Recurrence stage; always null for now.
+    /// The repeating series this task belongs to, or null for a one-off.
     pub recurrence_id: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
@@ -235,6 +265,23 @@ pub struct Task {
     /// Derived: how many days past its due date the task is, or 0 when it is
     /// not overdue. 1 means "was due yesterday".
     pub days_overdue: i64,
+    /// Derived: seconds of focus recorded against this task (section 17's
+    /// "Actual focus time"), summed over the focus sessions that named it.
+    ///
+    /// `0` means nobody has focused on this task yet — a measured zero, not a
+    /// missing figure, which is why it is not an `Option`. Sessions still
+    /// running are not counted; see [`FOCUS_SECONDS_COLUMN`].
+    pub focus_seconds: i64,
+    /// The reminder set on this task (development-plan.md section 24), or
+    /// null for a task nobody has asked to be reminded about.
+    ///
+    /// Read here, but written through `services/reminders.rs`, which owns
+    /// these columns and the rules about them — a reminder is not settable
+    /// through [`TaskUpdate`], because whether one is *valid* depends on the
+    /// due date and time the same edit might be changing. It comes back on
+    /// the task so a list can draw a bell on the rows that have one without a
+    /// query per row.
+    pub reminder: Option<TaskReminder>,
 }
 
 impl Task {
@@ -258,6 +305,8 @@ impl Task {
             completed_at: row.get("completed_at")?,
             is_overdue: days_overdue > 0,
             days_overdue,
+            focus_seconds: row.get("focus_seconds")?,
+            reminder: TaskReminder::from_row(row)?,
         })
     }
 }
@@ -265,11 +314,10 @@ impl Task {
 /// Fields accepted when creating a task. Everything except `title` is
 /// optional so quick-add (section 16) can post just a title.
 ///
-/// `routine_id` is intentionally absent: the column exists, but nothing can
-/// populate it until the Routine feature lands. `recurrence_id` is not
-/// settable either — pass `recurrence` instead and the rule is created and
-/// linked here, so the UI can never point a task at a rule that is not
-/// really there.
+/// `recurrence_id` is not settable — pass `recurrence` instead and the rule
+/// is created and linked here, so the UI can never point a task at a rule
+/// that is not really there. `routine_id`, by contrast, names a routine that
+/// already exists, so it is taken as given and checked.
 #[derive(Debug, Deserialize)]
 pub struct NewTask {
     pub title: String,
@@ -287,6 +335,10 @@ pub struct NewTask {
     pub due_time: Option<String>,
     #[serde(default)]
     pub estimated_minutes: Option<i64>,
+    /// The routine this task starts with (section 18). Checked against the
+    /// `routines` table, so a task can only point at one that exists.
+    #[serde(default)]
+    pub routine_id: Option<i64>,
     /// Makes this a repeating task (section 23). The rule is stored first and
     /// the task's `due_date` is snapped to the schedule's first occurrence, so
     /// "every weekday", created on a Saturday, starts on Monday.
@@ -314,6 +366,10 @@ pub struct TaskUpdate {
     pub due_time: Option<Option<String>>,
     #[serde(default, deserialize_with = "double_option")]
     pub estimated_minutes: Option<Option<i64>>,
+    /// Three-state: omitted leaves the assignment alone, an id assigns that
+    /// routine, and `null` unassigns without touching the routine itself.
+    #[serde(default, deserialize_with = "double_option")]
+    pub routine_id: Option<Option<i64>>,
     /// Three-state like the rest: omitted leaves the schedule alone, a rule
     /// sets or re-times it, and `null` stops the task repeating. Stopping a
     /// repeat drops the rule, which — via `ON DELETE SET NULL` — turns every
@@ -363,6 +419,8 @@ pub fn create(conn: &Connection, new_task: NewTask) -> ServiceResult<Task> {
     // failed to store would be a dangling reference.
     let transaction = conn.unchecked_transaction()?;
 
+    let routine_id = validate_routine(&transaction, new_task.routine_id)?;
+
     let recurrence_id = match new_task.recurrence {
         Some(rule) => {
             let anchor = match &due_date {
@@ -390,8 +448,9 @@ pub fn create(conn: &Connection, new_task: NewTask) -> ServiceResult<Task> {
         .execute(
             "INSERT INTO tasks (
             title, description, status, priority, category_id,
-            due_date, due_time, estimated_minutes, recurrence_id, completed_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            due_date, due_time, estimated_minutes, routine_id, recurrence_id,
+            completed_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 title,
                 description,
@@ -401,6 +460,7 @@ pub fn create(conn: &Connection, new_task: NewTask) -> ServiceResult<Task> {
                 due_date,
                 due_time,
                 estimated_minutes,
+                routine_id,
                 recurrence_id,
                 completed_at,
             ],
@@ -517,6 +577,11 @@ pub fn update(conn: &Connection, id: i64, update: TaskUpdate) -> ServiceResult<T
         values.push(optional_integer(validate_optional_minutes(
             estimated_minutes,
         )?));
+    }
+
+    if let Some(routine_id) = update.routine_id {
+        assignments.push("routine_id = ?");
+        values.push(optional_integer(validate_routine(conn, routine_id)?));
     }
 
     if let Some(status) = update.status {
@@ -683,13 +748,21 @@ pub fn ensure_recurring_instances(conn: &Connection) -> ServiceResult<Vec<Task>>
 
         // A rule with no tasks left (the user deleted the whole series) has
         // nothing to copy, so it simply stops producing.
+        // The reminder's *configuration* is copied and its delivery state is
+        // not: a repeating task that reminds you ten minutes before should go
+        // on doing that every day, and today's instance has plainly not been
+        // reminded about yet. Leaving `reminder_snoozed_until` and
+        // `reminder_fired_at` unset is what makes yesterday's snooze — or
+        // yesterday's Dismiss — end with yesterday.
         let inserted = conn.execute(
             "INSERT INTO tasks (
                 title, description, status, priority, category_id,
-                due_date, due_time, estimated_minutes, routine_id, recurrence_id
+                due_date, due_time, estimated_minutes, routine_id, recurrence_id,
+                reminder_kind, reminder_minutes_before, reminder_time
              )
              SELECT title, description, 'todo', priority, category_id,
-                    ?2, due_time, estimated_minutes, routine_id, recurrence_id
+                    ?2, due_time, estimated_minutes, routine_id, recurrence_id,
+                    reminder_kind, reminder_minutes_before, reminder_time
                FROM tasks
               WHERE recurrence_id = ?1
               ORDER BY id DESC
@@ -737,6 +810,7 @@ fn order_by(view: TaskView) -> &'static str {
 // ---------------------------------------------------------------------------
 
 const MISSING_CATEGORY: &str = "That task category no longer exists.";
+const MISSING_ROUTINE: &str = "That routine no longer exists.";
 
 /// Field labels for the shared date/time validators, so a rejection names the
 /// input the user actually filled in.
@@ -770,6 +844,21 @@ fn validate_optional_minutes(value: Option<i64>) -> ServiceResult<Option<i64>> {
     }
 }
 
+/// Refuses a `routine_id` naming a routine that is not there.
+///
+/// Checked here rather than left to the foreign key, because the `tasks`
+/// insert carries two of them — `category_id` and `routine_id` — and a
+/// constraint failure cannot say which one broke. Section 18 is about
+/// pointing a task at a workspace, so the message names the workspace.
+fn validate_routine(conn: &Connection, routine_id: Option<i64>) -> ServiceResult<Option<i64>> {
+    match routine_id {
+        Some(id) if routines::get(conn, id)?.is_none() => {
+            Err(ServiceError::validation(MISSING_ROUTINE))
+        }
+        other => Ok(other),
+    }
+}
+
 /// A due time on its own cannot be scheduled or sorted, so it is rejected
 /// rather than silently dropped.
 fn require_date_for_time(due_date: Option<&str>, due_time: Option<&str>) -> ServiceResult<()> {
@@ -785,6 +874,7 @@ fn require_date_for_time(due_date: Option<&str>, due_time: Option<&str>) -> Serv
 mod tests {
     use super::*;
     use crate::db::init_memory_db;
+    use crate::services::focus;
     use crate::services::task_recurrence::RecurrenceFrequency;
     use serde_json::json;
 
@@ -820,6 +910,113 @@ mod tests {
 
     fn titles(tasks: &[Task]) -> Vec<&str> {
         tasks.iter().map(|task| task.title.as_str()).collect()
+    }
+
+    /// A bare routine to point a task at (section 18). The actions are the
+    /// launcher's business; all a task needs is an id that resolves.
+    fn a_routine(conn: &Connection, name: &str) -> i64 {
+        routines::create(
+            conn,
+            serde_json::from_value(json!({ "name": name })).expect("valid NewRoutine payload"),
+        )
+        .unwrap()
+        .id
+    }
+
+    #[test]
+    fn assigns_a_routine_to_a_task() {
+        let conn = init_memory_db().unwrap();
+        let routine_id = a_routine(&conn, "Coding Mode");
+
+        let task = create(
+            &conn,
+            new_task(json!({ "title": "Finish React project", "routine_id": routine_id })),
+        )
+        .unwrap();
+
+        assert_eq!(task.routine_id, Some(routine_id));
+        assert_eq!(get(&conn, task.id).unwrap().unwrap().routine_id, Some(routine_id));
+    }
+
+    #[test]
+    fn assigns_and_unassigns_a_routine_on_update() {
+        let conn = init_memory_db().unwrap();
+        let routine_id = a_routine(&conn, "Study Mode");
+        let task = create(&conn, new_task(json!({ "title": "Study JavaScript" }))).unwrap();
+
+        let assigned = update(&conn, task.id, task_update(json!({ "routine_id": routine_id })))
+            .unwrap();
+        assert_eq!(assigned.routine_id, Some(routine_id));
+
+        // Omitting the field leaves the assignment alone...
+        let renamed = update(&conn, task.id, task_update(json!({ "title": "Study JS" }))).unwrap();
+        assert_eq!(renamed.routine_id, Some(routine_id));
+
+        // ...and null clears it without touching the routine.
+        let cleared = update(&conn, task.id, task_update(json!({ "routine_id": null }))).unwrap();
+        assert_eq!(cleared.routine_id, None);
+        assert!(routines::get(&conn, routine_id).unwrap().is_some());
+    }
+
+    #[test]
+    fn refuses_a_routine_that_does_not_exist() {
+        let conn = init_memory_db().unwrap();
+
+        let created = create(
+            &conn,
+            new_task(json!({ "title": "Finish React project", "routine_id": 999 })),
+        );
+        assert!(matches!(created, Err(ServiceError::Validation(message)) if message == MISSING_ROUTINE));
+
+        let task = create(&conn, new_task(json!({ "title": "Finish React project" }))).unwrap();
+        let updated = update(&conn, task.id, task_update(json!({ "routine_id": 999 })));
+        assert!(matches!(updated, Err(ServiceError::Validation(message)) if message == MISSING_ROUTINE));
+    }
+
+    #[test]
+    fn deleting_a_routine_leaves_its_tasks_behind() {
+        let conn = init_memory_db().unwrap();
+        let routine_id = a_routine(&conn, "Work Mode");
+        let task = create(
+            &conn,
+            new_task(json!({ "title": "Clear the inbox", "routine_id": routine_id })),
+        )
+        .unwrap();
+
+        routines::delete(&conn, routine_id).unwrap();
+
+        // ON DELETE SET NULL: the task survives, it just has no workspace.
+        let task = get(&conn, task.id).unwrap().unwrap();
+        assert_eq!(task.title, "Clear the inbox");
+        assert_eq!(task.routine_id, None);
+    }
+
+    #[test]
+    fn a_repeating_task_carries_its_routine_into_tomorrows_instance() {
+        let conn = init_memory_db().unwrap();
+        let routine_id = a_routine(&conn, "Morning Mode");
+
+        let task = create(
+            &conn,
+            new_task(json!({
+                "title": "Daily standup",
+                "routine_id": routine_id,
+                "recurrence": { "frequency": "daily" },
+            })),
+        )
+        .unwrap();
+        assert_eq!(task.routine_id, Some(routine_id));
+
+        // Backdate today's instance so the series owes one for today.
+        conn.execute(
+            "UPDATE tasks SET due_date = date('now', 'localtime', '-1 day') WHERE id = ?1",
+            params![task.id],
+        )
+        .unwrap();
+
+        let created = ensure_recurring_instances(&conn).unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].routine_id, Some(routine_id));
     }
 
     #[test]
@@ -1525,5 +1722,113 @@ mod tests {
         assert!(matches!(result, Err(ServiceError::Validation(_))));
         assert!(list(&conn, TaskFilter::default()).unwrap().is_empty());
         assert!(task_recurrence::list(&conn).unwrap().is_empty());
+    }
+
+    /// Records a finished focus session against a task, the way the timer
+    /// does: start it, backdate it so there is wall-clock time to measure
+    /// against, then end it with the seconds the frontend counted.
+    ///
+    /// The backdating is what makes the duration stick — `focus::end` clamps
+    /// a measured figure down to the time the session was really open for, so
+    /// a session started and ended in the same instant records nothing.
+    fn focused_on(conn: &Connection, task_id: i64, seconds: i64, completed: bool) {
+        let session = focus::start(
+            conn,
+            serde_json::from_value(json!({ "task_id": task_id, "preset": "custom",
+                                           "planned_seconds": seconds }))
+                .expect("valid NewFocusSession payload"),
+        )
+        .unwrap();
+
+        conn.execute(
+            "UPDATE focus_sessions SET started_at = datetime('now', ?2) WHERE id = ?1",
+            params![session.id, format!("-{seconds} seconds")],
+        )
+        .unwrap();
+
+        focus::end(
+            conn,
+            session.id,
+            serde_json::from_value(json!({ "completed": completed,
+                                           "duration_seconds": seconds }))
+                .expect("valid FocusSessionOutcome payload"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn totals_the_focus_time_recorded_against_a_task() {
+        let conn = init_memory_db().unwrap();
+        let task = create(&conn, new_task(json!({ "title": "Study JavaScript" }))).unwrap();
+
+        // Nothing focused on yet is a measured zero, not a missing figure.
+        assert_eq!(task.focus_seconds, 0);
+
+        // Section 19's example: a 45-minute estimate that took 43 minutes...
+        focused_on(&conn, task.id, 43 * 60, true);
+        assert_eq!(get(&conn, task.id).unwrap().unwrap().focus_seconds, 43 * 60);
+
+        // ...and a second sitting adds to it rather than replacing it —
+        // including an interrupted one, which is still focus that happened.
+        focused_on(&conn, task.id, 12 * 60, false);
+        let listed = list(&conn, task_filter(json!({ "view": "all" }))).unwrap();
+        assert_eq!(listed[0].focus_seconds, 55 * 60);
+    }
+
+    #[test]
+    fn a_running_session_is_not_counted_until_it_ends() {
+        let conn = init_memory_db().unwrap();
+        let task = create(&conn, new_task(json!({ "title": "Finish project report" }))).unwrap();
+
+        let session = focus::start(
+            &conn,
+            serde_json::from_value(json!({ "task_id": task.id, "preset": "50-10" })).unwrap(),
+        )
+        .unwrap();
+
+        // The clock is running, so the minutes are not focused *yet*.
+        assert_eq!(get(&conn, task.id).unwrap().unwrap().focus_seconds, 0);
+
+        conn.execute(
+            "UPDATE focus_sessions SET started_at = datetime('now', '-3000 seconds') WHERE id = ?1",
+            params![session.id],
+        )
+        .unwrap();
+        focus::end(
+            &conn,
+            session.id,
+            serde_json::from_value(json!({ "completed": true, "duration_seconds": 3000 })).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(get(&conn, task.id).unwrap().unwrap().focus_seconds, 3000);
+    }
+
+    #[test]
+    fn one_task_s_focus_time_is_not_another_s() {
+        let conn = init_memory_db().unwrap();
+        let mine = create(&conn, new_task(json!({ "title": "Mine" }))).unwrap();
+        let yours = create(&conn, new_task(json!({ "title": "Yours" }))).unwrap();
+
+        focused_on(&conn, mine.id, 25 * 60, true);
+
+        // An unattached session (section 34's "launched independently") is
+        // nobody's task time either.
+        let loose = focus::start(&conn, serde_json::from_value(json!({ "preset": "25-5" })).unwrap())
+            .unwrap();
+        conn.execute(
+            "UPDATE focus_sessions SET started_at = datetime('now', '-1500 seconds') WHERE id = ?1",
+            params![loose.id],
+        )
+        .unwrap();
+        focus::end(
+            &conn,
+            loose.id,
+            serde_json::from_value(json!({ "completed": true })).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(get(&conn, mine.id).unwrap().unwrap().focus_seconds, 25 * 60);
+        assert_eq!(get(&conn, yours.id).unwrap().unwrap().focus_seconds, 0);
     }
 }

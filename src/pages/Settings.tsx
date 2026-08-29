@@ -7,6 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import CommandActionsCard from "@/components/settings/CommandActionsCard";
 import { useThemeStore, type ThemePreference } from "@/stores/themeStore";
 
 function Settings() {
@@ -43,6 +44,8 @@ function Settings() {
           </div>
         </CardContent>
       </Card>
+
+      <CommandActionsCard />
 
       <p className="text-sm text-muted-foreground">
         The remaining settings groups (daily start time, default focus length, notifications,

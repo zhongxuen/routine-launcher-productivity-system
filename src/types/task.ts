@@ -12,6 +12,8 @@
  * strings written by SQLite, so convert them to local time before display.
  */
 
+import type { TaskReminder } from "./notification";
+
 /** The four statuses from development-plan.md section 11. */
 export const TASK_STATUSES = [
   "todo",
@@ -86,7 +88,13 @@ export interface Task {
   /** 24-hour `HH:MM`. Only ever set when `due_date` is set. */
   due_time: string | null;
   estimated_minutes: number | null;
-  /** Reserved for the Routine stage; always null for now. */
+  /**
+   * The routine this task starts with (section 18), or null. Look it up in
+   * the routine store to draw the icon and name, and to launch it.
+   *
+   * Cleared by the database if the routine is deleted, so a task never points
+   * at a workspace that is no longer there.
+   */
   routine_id: number | null;
   /**
    * The repeating series this task belongs to, or null for a one-off. Look
@@ -120,16 +128,44 @@ export interface Task {
    * it was due yesterday — use it for the "3 days late" style of label.
    */
   days_overdue: number;
+  /**
+   * Seconds of focus actually recorded against this task (section 17's
+   * "Actual focus time", section 19's "Focus: 43 minutes"), summed over every
+   * focus session that named it.
+   *
+   * `0` is a measured zero — nobody has focused on this task — rather than a
+   * missing figure, which is why it is a number and not `number | null`.
+   * Sessions still running are not in it: they have no duration yet, so the
+   * figure grows when a session *ends*, not while it runs. Like `is_overdue`
+   * it is computed on read, so a list on screen while a session finishes needs
+   * re-fetching to catch up — which `useFocusLifecycle` does for it.
+   *
+   * Format it with `formatFocusLength` from `@/lib/focus-utils`, the same
+   * function the focus history uses, so a length reads the same wherever it
+   * appears.
+   */
+  focus_seconds: number;
+  /**
+   * The reminder set on this task (section 24), or null if nobody asked to be
+   * reminded about it.
+   *
+   * Read-only from here: it is not a field of {@link TaskUpdate}, because
+   * whether a reminder is even valid depends on the due date and time the
+   * same edit might be changing. Set one with `setTaskReminder` from
+   * `@/services/notificationService`, which returns the task back with this
+   * filled in.
+   */
+  reminder: TaskReminder | null;
 }
 
 /**
  * Fields accepted when creating a task. Only `title` is required, so
  * quick-add (section 16) can post a title on its own.
  *
- * `routine_id` is deliberately not settable yet — there are no routines to
- * point at until that feature lands. `recurrence_id` is not settable either:
- * pass `recurrence` and the backend creates the rule and links it, so the UI
- * can never reference a rule that is not really there.
+ * `recurrence_id` is not settable: pass `recurrence` and the backend creates
+ * the rule and links it, so the UI can never reference a rule that is not
+ * really there. `routine_id` names a routine that already exists, so it is
+ * passed as an id and rejected if the routine is gone.
  */
 export interface NewTask {
   title: string;
@@ -144,6 +180,8 @@ export interface NewTask {
   due_time?: string | null;
   /** Must be at least 1. */
   estimated_minutes?: number | null;
+  /** The routine this task starts with (section 18). */
+  routine_id?: number | null;
   /**
    * Makes this a repeating task (section 23). The backend snaps `due_date` to
    * the schedule's first occurrence, so "every weekday" added on a Saturday
@@ -172,6 +210,12 @@ export interface TaskUpdate {
   due_date?: string | null;
   due_time?: string | null;
   estimated_minutes?: number | null;
+  /**
+   * Three-state like the rest: omitted leaves the assignment alone, an id
+   * assigns that routine, and `null` unassigns it. Unassigning only breaks
+   * the link — the routine itself is untouched.
+   */
+  routine_id?: number | null;
   /**
    * Three-state like the rest: omitted leaves the schedule alone, a rule sets
    * or re-times it, and `null` stops the task repeating. Stopping a repeat

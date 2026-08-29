@@ -30,6 +30,7 @@ import {
 } from "@/types/task";
 
 import RecurrencePicker from "./RecurrencePicker";
+import TaskRoutineField, { NO_ROUTINE, routineIdFromField } from "./TaskRoutineField";
 
 /**
  * The due-date choices. Section 16 wants a one-tap dropdown rather than a date
@@ -65,6 +66,7 @@ function QuickAddTask() {
   const [due, setDue] = useState<DueOption>("today");
   const [priority, setPriority] = useState<TaskPriority>("normal");
   const [recurrence, setRecurrence] = useState<NewTaskRecurrence | null>(null);
+  const [routine, setRoutine] = useState(NO_ROUTINE);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,6 +77,7 @@ function QuickAddTask() {
       setDue("today");
       setPriority("normal");
       setRecurrence(null);
+      setRoutine(NO_ROUTINE);
       setIsSaving(false);
       setError(null);
     }
@@ -93,6 +96,7 @@ function QuickAddTask() {
         title: trimmed,
         priority,
         due_date: dueDateFor(due),
+        routine_id: routineIdFromField(routine),
         recurrence,
       });
 
@@ -175,6 +179,13 @@ function QuickAddTask() {
                 </SelectContent>
               </Select>
             </div>
+
+            <TaskRoutineField
+              idPrefix="quick-add"
+              value={routine}
+              onChange={setRoutine}
+              className="col-span-2"
+            />
           </div>
 
           <RecurrencePicker idPrefix="quick-add" value={recurrence} onChange={setRecurrence} />

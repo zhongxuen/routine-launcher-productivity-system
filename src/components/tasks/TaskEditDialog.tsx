@@ -1,3 +1,4 @@
+import { Timer } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -19,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { formatFocusLength } from "@/lib/focus-utils";
 import { useTaskStore } from "@/stores/taskStore";
 import {
   TASK_PRIORITIES,
@@ -30,6 +32,7 @@ import {
 } from "@/types/task";
 
 import RecurrencePicker from "./RecurrencePicker";
+import TaskRoutineField, { routineFieldValue, routineIdFromField } from "./TaskRoutineField";
 
 /** The category select's value for "no category" — Select cannot hold "". */
 const NO_CATEGORY = "none";
@@ -72,6 +75,7 @@ function EditForm({ task, recurrence, onClose }: EditFormProps) {
   const [estimate, setEstimate] = useState(
     task.estimated_minutes === null ? "" : String(task.estimated_minutes),
   );
+  const [routine, setRoutine] = useState(routineFieldValue(task.routine_id));
   const [schedule, setSchedule] = useState<NewTaskRecurrence | null>(toDraft(recurrence));
 
   const [isSaving, setIsSaving] = useState(false);
@@ -97,6 +101,7 @@ function EditForm({ task, recurrence, onClose }: EditFormProps) {
         // without it, so clearing the date clears the time too.
         due_time: dueDate && dueTime ? dueTime : null,
         estimated_minutes: estimate ? Number(estimate) : null,
+        routine_id: routineIdFromField(routine),
         // Sending this only when it changed keeps an ordinary edit from
         // re-timing a series that the user did not touch.
         ...(scheduleChanged(schedule, recurrence) ? { recurrence: schedule } : {}),
@@ -216,6 +221,12 @@ function EditForm({ task, recurrence, onClose }: EditFormProps) {
             onChange={(event) => setEstimate(event.target.value)}
           />
         </div>
+        <TaskRoutineField
+          idPrefix="edit"
+          value={routine}
+          onChange={setRoutine}
+          className="col-span-2"
+        />
       </div>
 
       <RecurrencePicker idPrefix="edit" value={schedule} onChange={setSchedule} />
@@ -223,6 +234,17 @@ function EditForm({ task, recurrence, onClose }: EditFormProps) {
       {hadRecurrence && schedule === null && (
         <p className="text-xs text-muted-foreground">
           Ending the repeat keeps the tasks it already created.
+        </p>
+      )}
+
+      {/* Section 17's "Actual focus time", next to the estimate it is the
+          answer to. Read-only, and absent until there is one: it is summed
+          from the focus sessions this task has had, not something anyone
+          types. */}
+      {task.focus_seconds > 0 && (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Timer className="size-3.5" />
+          Actual focus time: {formatFocusLength(task.focus_seconds)}
         </p>
       )}
 

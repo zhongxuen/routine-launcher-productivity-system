@@ -1,40 +1,90 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAppStore } from "@/stores/appStore";
-import { checkDbHealth } from "@/services/healthService";
+import FocusWidget from "@/components/dashboard/FocusWidget";
+import ProgressWidget from "@/components/dashboard/ProgressWidget";
+import QuickStart from "@/components/dashboard/QuickStart";
+import TodaysTasks from "@/components/dashboard/TodaysTasks";
+import { Separator } from "@/components/ui/separator";
+import { formatDayHeading } from "@/lib/task-utils";
 
-function Dashboard() {
-  const bootCount = useAppStore((state) => state.bootCount);
-  const incrementBootCount = useAppStore((state) => state.incrementBootCount);
+/**
+ * How often the greeting and the date under TODAY re-check the clock. This is
+ * a desktop window that stays open for hours, so "Good afternoon" would still
+ * say afternoon at midnight — and the date under it would still say yesterday
+ * — if they were only read once at mount. A minute is finer than either
+ * boundary needs and costs one render an hour of idle time.
+ */
+const CLOCK_TICK_MS = 60_000;
 
-  // Temporary proof that the SQLite round trip works end-to-end. Remove
-  // once a real feature reads/writes the database from the UI instead.
+/** Section 7's greeting line. The mockup's own example is "Good afternoon". */
+function greetingFor(date: Date): string {
+  const hour = date.getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+/** The current time, re-read every minute so the greeting cannot go stale. */
+function useNow(): Date {
+  const [now, setNow] = useState(() => new Date());
+
   useEffect(() => {
-    checkDbHealth()
-      .then((value) => console.log("[db_health_check] round trip ok:", value))
-      .catch((error) => console.error("[db_health_check] round trip failed:", error));
+    const id = window.setInterval(() => setNow(new Date()), CLOCK_TICK_MS);
+    return () => window.clearInterval(id);
   }, []);
 
-  return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+  return now;
+}
 
-      <Card className="max-w-xl">
-        <CardHeader>
-          <CardTitle>Foundation check</CardTitle>
-          <CardDescription>
-            Temporary scaffolding. Replaced by the real dashboard in a later phase.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">bootCount: {bootCount}</span>
-          <Button size="sm" variant="secondary" onClick={incrementBootCount}>
-            Increment
-          </Button>
-        </CardContent>
-      </Card>
+/**
+ * The dashboard (development-plan.md section 7) — the app's daily starting
+ * point, and the one screen that is nothing but other screens' best parts.
+ *
+ * This file is composition only. Every block below owns its own data, its own
+ * loading and error states, and the dialogs it can raise: `TodaysTasks`
+ * mounts quick-add, `QuickStart` mounts the launch panel. That is why the
+ * dashboard can read from the task, routine, focus and progress stores at
+ * once without a single fetch of its own, and why a widget's Stage 9 rewrite
+ * (the progress store) will not touch this page.
+ *
+ * The vertical order is section 7's stated priority, not the order the
+ * mockup happens to draw: today's tasks, then quick routine launching, then
+ * focus, then progress. Progress comes last and narrow — sections 7 and 50
+ * both put gamification below the productivity system, so it is the only
+ * block that does not span the column.
+ */
+function Dashboard() {
+  const now = useNow();
+
+  return (
+    <div className="flex max-w-4xl flex-col gap-6">
+      <h1 className="text-2xl font-semibold tracking-tight">{greetingFor(now)}</h1>
+
+      <div className="flex flex-col gap-2">
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+            Today
+          </h2>
+          <p className="text-xs text-muted-foreground">{formatDayHeading(now)}</p>
+        </div>
+        <Separator />
+      </div>
+
+      {/* 1. Today's tasks — the mockup's Tasks column and its inline progress
+          meter, plus [ + Add Task ]. */}
+      <TodaysTasks />
+
+      <Separator />
+
+      {/* 2. Quick routine launching — the QUICK START tile row. */}
+      <QuickStart />
+
+      <Separator />
+
+      {/* 3. Focus, then 4. Progress. Both are self-contained cards, so they
+          are separated by their own borders rather than another rule. */}
+      <FocusWidget />
+      <ProgressWidget className="max-w-sm" />
     </div>
   );
 }

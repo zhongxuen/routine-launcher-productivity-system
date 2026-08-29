@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import PopupLauncher from "./PopupLauncher";
 
 interface NavItem {
   to: string;
@@ -31,6 +32,10 @@ const NAV_ITEMS: NavItem[] = [
 
 /**
  * Persistent top-level navigation for the app shell.
+ *
+ * The popup launcher below the nav is not navigation — it opens section 25's
+ * separate window rather than routing anywhere — which is why it is pushed to
+ * the bottom and separated from the links above it.
  */
 function Sidebar() {
   return (
@@ -55,6 +60,10 @@ function Sidebar() {
           {label}
         </NavLink>
       ))}
+
+      <div className="mt-auto border-t pt-3">
+        <PopupLauncher />
+      </div>
     </nav>
   );
 }

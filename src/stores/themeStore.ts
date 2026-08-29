@@ -44,6 +44,22 @@ export const useThemeStore = create<ThemeState>((set) => ({
 }));
 
 /**
+ * Re-reads the stored preference and applies it.
+ *
+ * For a window that was on screen while the setting changed somewhere else.
+ * The compact popup (development-plan.md section 25) is the case: it is a
+ * second webview sharing this origin's localStorage, but it is only *hidden*
+ * when dismissed, so a theme switched in Settings meanwhile would otherwise
+ * still be the old one when it comes back. Called from the popup when it is
+ * shown again.
+ */
+export function refreshTheme() {
+  const preference = readStoredPreference();
+  applyToDocument(preference);
+  useThemeStore.setState({ preference, resolved: resolve(preference) });
+}
+
+/**
  * Applies the stored preference and keeps "system" in sync with the OS.
  * Called once at startup, before React renders, to avoid a flash of the
  * wrong theme.

@@ -1,0 +1,120 @@
+/**
+ * Types the routine UI owns.
+ *
+ * `src/types/routine.ts` mirrors the Rust payloads and is the wire contract;
+ * nothing in this file crosses the `invoke` boundary. What lives here is the
+ * state a *view* needs and the backend has no opinion about: an action that
+ * has not been attempted yet, and the section 33 statistics block.
+ *
+ * Keeping the two apart is what lets the backend's types be regenerated or
+ * edited without touching the launch panel, and vice versa.
+ */
+
+import type { ActionStatus, RoutineAction } from "@/types/routine";
+
+/* -------------------------------------------------------------------------- */
+/* A launch in progress (development-plan.md section 32)                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * An action's state in the launch panel.
+ *
+ * The backend's three outcomes plus the two states an action passes through
+ * before there is an outcome to report — which only the UI ever sees, because
+ * only the UI is watching.
+ */
+export type ActionRunStatus = "pending" | "running" | ActionStatus;
+
+export interface RoutineRunAction {
+  action: RoutineAction;
+  status: ActionRunStatus;
+  /** Why it failed, or why it was skipped. Null until there is a reason. */
+  message: string | null;
+}
+
+/**
+ * How the run as a whole is doing.
+ *
+ * - `running` — actions are still resolving
+ * - `complete` — everything attempted succeeded ("Ready.")
+ * - `partial` — at least one action failed; section 32's Retry / Continue
+ *
+ * There is no terminal "failed" state on purpose. A routine that lost one
+ * action still opened the rest, and section 87 is explicit that a failure is
+ * a per-action fact, not a verdict on the launch.
+ */
+export type RoutineRunStatus = "running" | "complete" | "partial";
+
+/**
+ * The task a launch was started from (section 18's START TASK), when it was
+ * started from one rather than from the routine's own card.
+ *
+ * Copied into the run for the same reason the routine's name is: the panel
+ * has to keep reading correctly even if the task is edited underneath it.
+ */
+export interface RoutineRunTask {
+  taskId: number;
+  title: string;
+  /**
+   * The focus length this task asks for, in minutes, or null when neither the
+   * task's estimate nor the routine's timer named one. Only ever *displayed*
+   * here — the session itself is started by whoever subscribes to
+   * `requestFocus` in `src/lib/focus-intent.ts`, which the launch fires once
+   * its actions are done. A null means no session is started either.
+   */
+  focusMinutes: number | null;
+}
+
+/**
+ * One launch, as the panel in section 32 renders it.
+ *
+ * The routine's name and icon are copied in rather than looked up by id, so
+ * the panel keeps reading correctly if the routine is edited or deleted while
+ * the run is still on screen.
+ *
+ * The run holds outcomes only. The "3 / 4 actions completed" line is counted
+ * off this list by `runCounts`, not taken from the backend's own
+ * `completed_label`, because a retry reports on the actions it retried — one
+ * line about one action — while the panel is still showing the whole routine.
+ */
+export interface RoutineRun {
+  routineId: number;
+  routineName: string;
+  routineIcon: string | null;
+  actions: RoutineRunAction[];
+  status: RoutineRunStatus;
+  /**
+   * The task this launch is serving, or null for a routine started on its
+   * own. Present is what turns section 32's launch panel into section 18's
+   * combined "START TASK" feedback — same checklist, plus the task it is for
+   * and the focus session it leads to.
+   */
+  task: RoutineRunTask | null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Statistics (development-plan.md section 33)                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The five figures section 33 tracks per routine.
+ *
+ * camelCase because this is not a wire shape: `launches` and `lastUsed` are
+ * read straight off the routine row.
+ *
+ * The other three are `null` rather than `0`, because there is a difference
+ * between "this routine has had no focus time" and "focus time is not
+ * recorded yet", and only one of those is true today — see the TODO in
+ * `RoutineStatisticsDialog.tsx`. A `null` renders as a dash, not a zero, so
+ * the panel never shows an invented figure as if it were measured.
+ */
+export interface RoutineStatistics {
+  launches: number;
+  /** Total focus time recorded against this routine, in seconds. */
+  focusSeconds: number | null;
+  /** Mean length of one focus session in seconds. */
+  averageSessionSeconds: number | null;
+  tasksCompleted: number | null;
+  /** UTC timestamp of the last launch, or null if never launched. */
+  lastUsed: string | null;
+}

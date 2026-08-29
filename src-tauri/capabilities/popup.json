@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "popup",
+  "description": "Capability for the compact popup window (development-plan.md section 25). Core only: the popup reads and writes tasks and launches routines through this app's own commands, which are not permission-gated, and needs `core:event` so it can hear `popup://shown` and the cross-window data-changed broadcast. Deliberately narrower than the main window's capability — no filesystem, no dialog, no notification plugin from a window whose whole job is a checklist.",
+  "windows": [
+    "popup"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}
