@@ -50,16 +50,34 @@ function PopupLauncher() {
       onClick={() => void handleClick()}
       title="A small always-on-top window with today's tasks and one-click routine launch"
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition-colors",
+        "flex w-full items-center gap-2.5 rounded-md py-2 text-left text-sm transition-colors",
+        // Matches the rail the nav links above collapse into below `lg` —
+        // see `Sidebar`, which is also where the `sr-only` label is explained.
+        "justify-center px-0 lg:justify-start lg:px-3",
         "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
       )}
     >
-      <PictureInPicture2 className="size-4" />
-      Popup
+      {/* On the rail the icon carries the open dot itself, because there is
+          no label for `ml-auto` to push it away from. */}
+      <span className="relative flex shrink-0 items-center">
+        <PictureInPicture2 className="size-4" aria-hidden />
+        {isOpen && (
+          <span
+            className="absolute -right-1 -top-0.5 size-1.5 rounded-full bg-status-completed lg:hidden"
+            aria-hidden
+          />
+        )}
+      </span>
+      <span className="sr-only lg:not-sr-only">Popup</span>
+      {/* The state is said in the button's own name rather than hung off a
+          decorative dot, so it survives the dot moving between the two
+          layouts — and so it is announced at all, which an `aria-label` on a
+          plain `<span>` is not guaranteed to be. */}
+      {isOpen && <span className="sr-only">(open)</span>}
       {isOpen && (
         <span
-          className="ml-auto size-1.5 rounded-full bg-status-completed"
-          aria-label="Open"
+          className="ml-auto hidden size-1.5 rounded-full bg-status-completed lg:block"
+          aria-hidden
         />
       )}
     </button>

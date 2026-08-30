@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use super::error::{ServiceError, ServiceResult};
 use super::routines;
 use super::validate::validate_optional_date;
+use super::xp;
 
 /// The longest a single custom session may be asked to run. Twelve hours is
 /// far past any believable stretch of focus; the cap is here so a stray
@@ -440,6 +441,23 @@ pub fn end(conn: &Connection, id: i64, outcome: FocusSessionOutcome) -> ServiceR
     }
 
     finish(&transaction, id, outcome.completed, outcome.duration_seconds)?;
+
+    // Section 43's +25 XP for a completed session. Every way a session can
+    // end goes through `finish`, but only the ones that come through *here*
+    // are a user finishing one: the auto-close in `start` and the abandoned
+    // session `close_abandoned` tidies up are both `completed: false` and
+    // both earn nothing, which `award_focus_session` re-checks against the
+    // row rather than trusting the argument.
+    //
+    // Inside the transaction, and behind `xp::note`, for the same reason the
+    // task hook is: the session is recorded whether or not the XP row can be
+    // written (section 50).
+    if outcome.completed {
+        xp::note(
+            xp::award_focus_session(&transaction, id),
+            &format!("completing focus session {id}"),
+        );
+    }
 
     let ended = require(get(&transaction, id)?, id)?;
     transaction.commit()?;

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Widget</title>
+    <!--
+      The one window that must NOT paint a background. Its two siblings fill
+      themselves in before the stylesheet loads so they never flash white;
+      this one is a transparent window (see `services/widget.rs`) and the
+      widget draws its own card on it at whatever opacity the user chose. A
+      background here — or the app-wide `bg-background` on `body` — would be
+      an opaque rectangle behind a translucent widget.
+
+      These rules are outside `@layer`, so they win against Tailwind's base
+      layer regardless of what order the stylesheet arrives in.
+    -->
+    <style>
+      html,
+      body {
+        background: transparent;
+      }
+
+      /* No scrollbar, and no rubber-banding a window this small. */
+      body {
+        overflow: hidden;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/widget.tsx"></script>
+  </body>
+</html>

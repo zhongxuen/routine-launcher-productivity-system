@@ -9,9 +9,8 @@
     "main"
   ],
   "permissions": [
-    "global-shortcut:default",
-    "autostart:default"
+    "global-shortcut:default"
   ],
   "$schema": "../gen/schemas/desktop-schema.json",
-  "description": "Desktop-only capabilities: global shortcut and launch-on-startup."
+  "description": "Desktop-only capabilities. The autostart and updater plugins are loaded (development-plan.md section 85) but deliberately NOT granted here: per section 86 a registry write and running an installer are native OS operations, so launch-at-startup goes through this app's own commands in `commands/app_info.rs` and the update check goes through `commands/updates.rs` rather than through either plugin's JS API. Granting `autostart:default` would give any script in the main window a second, unguarded route to the same `Run` key; granting `updater:default` would give it a route to download and execute an installer without passing the one place that closes the running focus session first and without the user having pressed anything."
 }

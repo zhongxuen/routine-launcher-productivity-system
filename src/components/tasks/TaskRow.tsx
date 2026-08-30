@@ -7,6 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { phaseClass, type ItemPhase } from "@/hooks/useAnimatedList";
+import { reducedMotion } from "@/lib/motion";
+import { playSound } from "@/lib/sounds";
 import { FOCUS_TIMER_PATH, useStartFocus } from "@/hooks/useStartFocus";
 import { useStartTask, startableRoutine } from "@/hooks/useStartTask";
 import { cn } from "@/lib/utils";
@@ -32,6 +35,13 @@ interface TaskRowProps {
   showDate?: boolean;
   /** Show the repeat schedule — on in the Recurring view, off elsewhere. */
   showRecurrence?: boolean;
+  /**
+   * Where this row is in its life on screen, from `TaskSection`'s
+   * `useAnimatedList`. Defaults to `present`, so a row rendered outside an
+   * animated list — the dashboard's `DashboardTaskRow` is its own component,
+   * but a future caller need not be — simply does not animate.
+   */
+  phase?: ItemPhase;
 }
 
 /**
@@ -62,7 +72,12 @@ interface TaskRowProps {
  * it. It is a pointer, not a selection: nothing else reads it, and it goes on
  * its own.
  */
-function TaskRow({ task, showDate = false, showRecurrence = false }: TaskRowProps) {
+function TaskRow({
+  task,
+  showDate = false,
+  showRecurrence = false,
+  phase = "present",
+}: TaskRowProps) {
   const toggleTaskCompletion = useTaskStore((state) => state.toggleTaskCompletion);
   const openTaskEditor = useTaskStore((state) => state.openTaskEditor);
   const recurrence = useTaskStore((state) =>
@@ -94,7 +109,12 @@ function TaskRow({ task, showDate = false, showRecurrence = false }: TaskRowProp
   // has been waiting for.
   useEffect(() => {
     if (!isRevealed) return;
-    row.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    row.current?.scrollIntoView({
+      block: "center",
+      // A smooth scroll is motion in the plainest sense, and the one piece of
+      // it in this app that moves the whole page rather than one element.
+      behavior: reducedMotion() ? "auto" : "smooth",
+    });
   }, [isRevealed]);
 
   const dueTime = formatDueTime(task.due_time);
@@ -109,6 +129,11 @@ function TaskRow({ task, showDate = false, showRecurrence = false }: TaskRowProp
   async function handleToggle() {
     try {
       await toggleTaskCompletion(task.id);
+      // After the write, not before: a cue that played on the click and then
+      // had the row snap back would be saying something that did not happen.
+      // Only on the way to done — reopening a task is a correction, and
+      // sounding the same note for it would make the two indistinguishable.
+      if (!isCompleted) playSound("task-complete");
     } catch (cause) {
       // The checkbox is driven by the stored status, so it snaps back on its
       // own; the toast is what explains why.
@@ -124,6 +149,7 @@ function TaskRow({ task, showDate = false, showRecurrence = false }: TaskRowProp
       className={cn(
         "group flex items-start gap-3 rounded-md px-2 py-2 transition-colors hover:bg-accent/50",
         isRevealed && "bg-accent/40 ring-2 ring-primary/60 ring-offset-2 ring-offset-background",
+        phaseClass(phase),
       )}
     >
       <Checkbox

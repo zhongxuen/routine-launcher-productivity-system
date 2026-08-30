@@ -22,7 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { actionLabel, actionSummary, formatLastUsed } from "@/lib/routine-utils";
+import { actionLabel, actionSummary, formatFocusTime, formatLastUsed } from "@/lib/routine-utils";
 import { cn } from "@/lib/utils";
 import { useRoutineStore } from "@/stores/routineStore";
 import type { RoutineWithActions } from "@/types/routine";
@@ -41,12 +41,24 @@ interface RoutineCardProps {
  * workspace", and what is in the workspace is the thing worth showing — so it
  * lists every action rather than a count, with disabled ones struck through
  * so a routine never quietly does less than the card says.
+ *
+ * The footer is section 33's long-term feedback in two lines: how often and
+ * how recently the routine was started, and — once there is any — the focus
+ * time and finished tasks it has produced. The second line is omitted while
+ * both are zero rather than shown as "0m focused · 0 tasks done", which would
+ * read as a verdict on a routine the user has only just built. Both lines are
+ * one button: the whole footer opens the full panel.
  */
 function RoutineCard({ routine }: RoutineCardProps) {
   const navigate = useNavigate();
   const launchRoutine = useRoutineStore((state) => state.launchRoutine);
   const deleteRoutine = useRoutineStore((state) => state.deleteRoutine);
   const openStatistics = useRoutineStore((state) => state.openStatistics);
+  // Section 33's figures for this card's footer. Undefined until the second
+  // half of `loadRoutines` lands (or if it failed), in which case the footer
+  // is just the launch line it has always been — a card that quietly loses a
+  // line is better than one that claims zero hours it never measured.
+  const statistics = useRoutineStore((state) => state.statistics[routine.id]);
   const isRunning = useRoutineStore((state) => state.run?.status === "running");
 
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -132,10 +144,19 @@ function RoutineCard({ routine }: RoutineCardProps) {
         <button
           type="button"
           onClick={() => openStatistics(routine.id)}
-          className="cursor-pointer text-left text-xs text-muted-foreground hover:text-foreground hover:underline"
+          className="min-w-0 cursor-pointer text-left text-xs text-muted-foreground hover:text-foreground hover:underline"
+          title="See this routine's statistics"
         >
-          {routine.launch_count} launch{routine.launch_count === 1 ? "" : "es"} ·{" "}
-          {formatLastUsed(routine.last_launched_at)}
+          <span className="block truncate">
+            {routine.launch_count} launch{routine.launch_count === 1 ? "" : "es"} ·{" "}
+            {formatLastUsed(routine.last_launched_at)}
+          </span>
+          {statistics && (statistics.focusSeconds > 0 || statistics.tasksCompleted > 0) && (
+            <span className="block truncate">
+              {formatFocusTime(statistics.focusSeconds)} focused · {statistics.tasksCompleted} task
+              {statistics.tasksCompleted === 1 ? "" : "s"} done
+            </span>
+          )}
         </button>
 
         <Button

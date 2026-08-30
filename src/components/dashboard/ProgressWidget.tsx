@@ -1,10 +1,12 @@
 import { useEffect } from "react";
 import { Flame } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import ErrorState from "@/components/common/states/ErrorState";
+import StaleNotice from "@/components/common/states/StaleNotice";
 import { Card } from "@/components/ui/card";
 import { Progress as ProgressBar } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useLevelUp } from "@/hooks/useLevelUp";
 import { cn } from "@/lib/utils";
 import { useProgressStore } from "@/stores/progressStore";
 import { xpFraction, type LevelProgress, type StreakProgress } from "@/types/progress";
@@ -20,12 +22,12 @@ import { xpFraction, type LevelProgress, type StreakProgress } from "@/types/pro
  * tasks. That is a design constraint, not a placeholder — the widget should
  * still look like this once the numbers behind it are real.
  *
- * The numbers are not real yet. They come from `progressStore`, which is a
- * stub until Stage 9 (sections 43-47) builds the XP backend. This component
- * takes no data props at all — it reads the store directly — which is what
- * lets Stage 9's prompt 9.3 swap the store's body for `xpService` without
- * opening this file. Anything derived from the numbers therefore belongs in
- * the store or in `types/progress.ts`, not in here.
+ * The numbers come from `progressStore`, which reads `xpService` — the same
+ * source as the level bar at the head of the Progress page, so the two can
+ * never disagree about what level the user is. This component takes no data
+ * props at all, which is what let Stage 9 replace the store's body without
+ * opening this file, and is why anything derived from the numbers belongs in
+ * the store or in `types/progress.ts` rather than in here.
  *
  * Self-contained: Prompt 6.5 composes it into `Dashboard.tsx` and positions
  * it with `className`.
@@ -50,13 +52,23 @@ function ProgressWidget({ className }: { className?: string }) {
       </header>
 
       <div className="flex flex-col gap-3 px-5">
-        {isLoading || !progress ? (
-          <ProgressSkeleton />
-        ) : (
+        {progress ? (
           <>
             <LevelBar level={progress.level} />
             <StreakLine streak={progress.streak} />
           </>
+        ) : isLoading ? (
+          <ProgressSkeleton />
+        ) : (
+          // Nothing has ever loaded and the read failed. Without this the
+          // skeleton stayed up for good, which reads as a permanent wait
+          // rather than as something the user can press a button about.
+          <ErrorState
+            title="Could not load your progress."
+            message={error}
+            onRetry={() => void loadProgress()}
+            className="py-4"
+          />
         )}
       </div>
 
@@ -64,13 +76,12 @@ function ProgressWidget({ className }: { className?: string }) {
           Focus widget states a short total: stale XP is still worth looking
           at, and this block is the least important thing on the page to be
           loud about failing. */}
-      {error && (
-        <div className="flex flex-wrap items-center gap-1 px-5 text-xs text-muted-foreground">
-          <span>Progress may be out of date.</span>
-          <Button variant="link" size="xs" className="h-auto p-0" onClick={() => void loadProgress()}>
-            Try again
-          </Button>
-        </div>
+      {error && progress && (
+        <StaleNotice
+          className="px-5"
+          message="Progress may be out of date."
+          onRetry={() => void loadProgress()}
+        />
       )}
     </Card>
   );
@@ -84,10 +95,16 @@ function ProgressWidget({ className }: { className?: string }) {
  */
 function LevelBar({ level }: { level: LevelProgress }) {
   const percent = Math.round(xpFraction(level) * 100);
+  const isLevellingUp = useLevelUp(level.level);
 
   return (
     <div className="flex flex-col gap-1.5">
-      <p className="text-sm font-medium">Level {level.level}</p>
+      {/* Section 50 puts this widget at the bottom of the hierarchy, so the
+          level-up is the same single swell as on the Progress page and no
+          more. See `useLevelUp`. */}
+      <p className={cn("text-sm font-medium", isLevellingUp && "animate-pop")}>
+        Level {level.level}
+      </p>
 
       <div className="flex items-center gap-3">
         <ProgressBar

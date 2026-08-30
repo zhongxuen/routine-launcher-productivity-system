@@ -1,8 +1,18 @@
 @import "tailwindcss";
+/* Supplies the `animate-in` / `animate-out` / `fade-*` / `zoom-*` / `slide-*`
+   utilities that every Radix-backed component in `components/ui` is written
+   against. Without it those class names are inert and dialogs, popovers,
+   tooltips, dropdowns and sheets appear and vanish on a single frame. */
+@import "tw-animate-css";
 
 /* Dark mode is driven by a `dark` class on <html> rather than the OS setting,
    so the in-app theme setting (development-plan.md section 48) stays authoritative. */
 @custom-variant dark (&:is(.dark *));
+
+/* Motion is driven by a `reduce-motion` class on <html> for the same reason
+   dark mode is: the in-app setting has to be able to disagree with the OS.
+   `motionStore` puts the class there; every animation below reads it. */
+@custom-variant reduce-motion (&:is(.reduce-motion *));
 
 :root {
   --radius: 0.625rem;
@@ -18,26 +28,35 @@
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
   --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
+  --muted-foreground: oklch(0.49 0.016 285.938);
+  /* The third grey. See the note above `--muted-subtle` in `.dark`. */
+  --muted-subtle: oklch(0.545 0.016 285.938);
   --accent: oklch(0.967 0.001 286.375);
   --accent-foreground: oklch(0.21 0.006 285.885);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
-  --ring: oklch(0.705 0.015 286.067);
+  --border: oklch(0.88 0.004 286.32);
+  --input: oklch(0.66 0.008 286.32);
+  --ring: oklch(0.58 0.16 258);
 
   /* Task priority accents (section 12). Deliberately low-chroma: the plan calls
-     for subtle indicators, not an enterprise project-management look. */
-  --priority-low: oklch(0.552 0.016 285.938);
-  --priority-normal: oklch(0.623 0.129 237.31);
-  --priority-high: oklch(0.705 0.163 60.5);
-  --priority-urgent: oklch(0.62 0.208 25.8);
+     for subtle indicators, not an enterprise project-management look.
+
+     Every one of these is drawn as *text* — `text-priority-urgent` on an
+     overdue date, a coloured dot beside a title — so each is dark enough to
+     clear 4.5:1 on white rather than picked for the swatch. The light theme is
+     where that bites: the same hue that reads richly on a near-black card is
+     washed out on white, which is why these numbers are not simply the dark
+     theme's lightened. */
+  --priority-low: oklch(0.49 0.016 285.938);
+  --priority-normal: oklch(0.563 0.123 237.31);
+  --priority-high: oklch(0.577 0.135 60.5);
+  --priority-urgent: oklch(0.593 0.208 25.8);
 
   /* Task status (section 11). */
-  --status-todo: oklch(0.552 0.016 285.938);
-  --status-in-progress: oklch(0.623 0.129 237.31);
-  --status-completed: oklch(0.63 0.16 149.2);
-  --status-cancelled: oklch(0.705 0.015 286.067);
+  --status-todo: oklch(0.49 0.016 285.938);
+  --status-in-progress: oklch(0.563 0.123 237.31);
+  --status-completed: oklch(0.551 0.154 149.2);
+  --status-cancelled: oklch(0.568 0.015 286.067);
 }
 
 .dark {
@@ -53,12 +72,24 @@
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.274 0.006 286.033);
   --muted-foreground: oklch(0.705 0.015 286.067);
+  /**
+   * The third grey, for supporting lines under a muted one — scan hints, "8
+   * files left out of these results", the folder a report was written to.
+   *
+   * It exists because the pattern it replaces cannot be made accessible. That
+   * tier used to be written `text-muted-foreground/70`, and a 70% grey over
+   * white can reach at best 3.0:1 whatever colour is faded — the white showing
+   * through sets the ceiling. So the tier is a colour of its own rather than a
+   * transparency, chosen a step lighter than `--muted-foreground` while still
+   * clearing 4.5:1 on card, page and `--muted` alike.
+   */
+  --muted-subtle: oklch(0.62 0.015 286.067);
   --accent: oklch(0.274 0.006 286.033);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.552 0.016 285.938);
+  --input: oklch(1 0 0 / 40%);
+  --ring: oklch(0.72 0.15 258);
 
   --priority-low: oklch(0.705 0.015 286.067);
   --priority-normal: oklch(0.685 0.129 237.31);
@@ -68,7 +99,7 @@
   --status-todo: oklch(0.705 0.015 286.067);
   --status-in-progress: oklch(0.685 0.129 237.31);
   --status-completed: oklch(0.723 0.169 149.579);
-  --status-cancelled: oklch(0.552 0.016 285.938);
+  --status-cancelled: oklch(0.602 0.015 285.938);
 }
 
 @theme inline {
@@ -84,6 +115,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-muted-subtle: var(--muted-subtle);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
@@ -105,11 +137,153 @@
   --radius-md: calc(var(--radius) * 0.875);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.5);
+
+  /* One scale for the whole app, so a row leaving a list and a dialog closing
+     agree about how long "quick" is. The numbers are duplicated in
+     `lib/motion.ts` for the few places JavaScript has to hold an element on
+     screen for the length of its own exit animation — that file is the one
+     that says why. */
+  --duration-quick: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 260ms;
+
+  /* Decelerating, never bouncy: this is a productivity tool, and section 50
+     puts the work above the presentation. */
+  --ease-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  --animate-page-enter: page-enter var(--duration-base) var(--ease-soft);
+  --animate-row-enter: row-enter var(--duration-base) var(--ease-soft);
+  --animate-row-leave: row-leave var(--duration-base) var(--ease-soft) forwards;
+  --animate-card-enter: card-enter var(--duration-base) var(--ease-soft);
+  --animate-card-leave: card-leave var(--duration-base) var(--ease-soft) forwards;
+  --animate-pop: pop var(--duration-slow) var(--ease-soft);
+
+  @keyframes page-enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* Rows arrive and leave along the axis the list runs in, and the collapsing
+     max-height is what stops the rows below them from jumping. */
+  @keyframes row-enter {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* The `max-height` is a ceiling, not the row's height — CSS cannot animate
+     from `auto`. It starts a little above the tallest a task row gets (a
+     wrapped title over a full meta line) so the constraint does nothing until
+     the animation is part-way through, and the row then collapses over what
+     is left. By that point the opacity is most of the way down, which is what
+     makes the approximation invisible. */
+  @keyframes row-leave {
+    from {
+      opacity: 1;
+      max-height: 6rem;
+      transform: none;
+    }
+    to {
+      opacity: 0;
+      max-height: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      transform: translateX(6px);
+    }
+  }
+
+  /* Cards get no height collapse at all. A routine card is four times the
+     height of a task row, so the same trick would need a ceiling high enough
+     to do nothing for most of the animation and then drop the card in one
+     step — and in a two-column grid the cards after it reflow anyway. Fading
+     and shrinking in place is honest about that. */
+  @keyframes card-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes card-leave {
+    from {
+      opacity: 1;
+      transform: none;
+    }
+    to {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+
+  /* The gamification beat, and deliberately the whole of it: sections 50 and
+     88 want progression to stay in the corner of the eye, so a level-up is a
+     bar that swells once rather than a modal that has to be dismissed. */
+  @keyframes pop {
+    0% {
+      transform: scale(1);
+    }
+    45% {
+      transform: scale(1.06);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
+  }
+
+  /**
+   * The focus ring of last resort (development-plan.md section 84).
+   *
+   * `components/ui` draws its own — a 3px `ring` in `--ring` — but most of
+   * this app is not shadcn. The sidebar links, the launcher rows, the chips in
+   * the cleanup reviews, the routine-statistics link under each card: all
+   * plain elements, and every one of them was relying on whatever ring the
+   * webview happened to draw. This is the guarantee that anything focusable
+   * shows *something*, in the app's own colour, at a width you can see.
+   *
+   * `:focus-visible` rather than `:focus`, so a mouse click does not leave a
+   * ring behind. Zero specificity via `:where()`, so any component that wants
+   * a different indicator only has to say so; the shadcn primitives already do
+   * — their `outline-none` utility sits in a later cascade layer than this
+   * rule, so they keep their ring and never draw both.
+   *
+   * `outline` rather than `box-shadow` because an outline follows
+   * `border-radius`, is not clipped by `overflow: hidden`, and survives
+   * Windows high-contrast mode, where colours are replaced but the outline is
+   * kept.
+   */
+  :where(
+    a[href],
+    button,
+    input,
+    select,
+    textarea,
+    summary,
+    [tabindex]:not([tabindex^="-"]),
+    [contenteditable="true"]
+  ):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 
   html,
@@ -138,5 +312,64 @@
   textarea,
   [contenteditable="true"] {
     user-select: text;
+  }
+
+  /* Switching theme repaints every surface in the window at once, which reads
+     as a flash unless the colours are allowed to cross over. Only the colour
+     properties are transitioned, and only while the class is on — a blanket
+     `transition: all` on every element would make the app feel laggy for the
+     rest of the session. `motionStore.applyToDocument` adds the class, then
+     takes it off again once the crossfade is done. */
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition:
+      background-color var(--duration-slow) var(--ease-soft),
+      border-color var(--duration-slow) var(--ease-soft),
+      color var(--duration-slow) var(--ease-soft),
+      fill var(--duration-slow) var(--ease-soft),
+      stroke var(--duration-slow) var(--ease-soft) !important;
+  }
+
+  /* The single place motion is turned off.
+   *
+   * Everything animated in this app is decoration over a state change that
+   * has already happened, so removing the animation costs nothing but the
+   * flourish — which is exactly what someone asking for reduced motion is
+   * asking to lose. `1ms` rather than `0s` because a `transitionend` or
+   * `animationend` listener still has to fire; several exit animations end by
+   * unmounting their element, and `0s` can skip the event entirely and strand
+   * the row on screen forever.
+   *
+   * `useAnimatedList` does not depend on that — it uses a timer, and shortens
+   * it by reading the same preference from `lib/motion.ts` — but a rule this
+   * broad should not be the thing that decides whether unrelated code is
+   * correct. */
+  html.reduce-motion *,
+  html.reduce-motion *::before,
+  html.reduce-motion *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@layer utilities {
+  /* A scroll container whose scrollbar is not part of the design.
+     Used by `SubNav` (development-plan.md section 84): the tab row scrolls
+     sideways on a narrow window, and a horizontal scrollbar drawn directly
+     under a row of tabs reads as a second border rather than as a control.
+     Only ever put on something a pointer can also drag or a keyboard can
+     reach — hiding a scrollbar on a container that has no other way to be
+     scrolled is how content becomes unreachable. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 }

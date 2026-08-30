@@ -42,6 +42,7 @@ import { useEffect } from "react";
 import { onFocusSessionEnded } from "@/lib/focus-events";
 import { onFocusIntent } from "@/lib/focus-intent";
 import { startFocusFor } from "@/hooks/useStartFocus";
+import { useFocusSync } from "@/hooks/useFocusSync";
 import { useFocusStore } from "@/stores/focusStore";
 import { useTaskStore } from "@/stores/taskStore";
 
@@ -51,6 +52,12 @@ export function useFocusLifecycle(): void {
   useEffect(() => {
     void restoreSession();
   }, [restoreSession]);
+
+  // The fourth thing, and the newest: section 26's widget shows the same
+  // clock in a second window, so this one both announces its changes and
+  // adopts the widget's. Mounted here rather than in the shell for the reason
+  // everything else in this hook is — a session outlives the page.
+  useFocusSync();
 
   // Section 18/89's chain, closed: the workspace has finished opening, so the
   // session it was opened for begins. `routineStore` emits the intent after

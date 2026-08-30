@@ -25,3 +25,11 @@ dist-ssr
 
 # Planning docs (not part of the shipped app)
 md-files/
+
+# Updater signing keys (development-plan.md section 85). The pair lives
+# outside the repository — ~/.tauri/routine-launcher.key and .key.pub — and
+# these patterns are the second line of defence for a copy that ends up here
+# by accident. Losing the private key means shipped builds can never be
+# updated again; committing it means anyone can sign an update they will accept.
+*.key
+*.key.pub

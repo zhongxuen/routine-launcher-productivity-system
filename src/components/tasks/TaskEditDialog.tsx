@@ -2,6 +2,7 @@ import { Timer } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import InlineError from "@/components/common/states/InlineError";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -248,7 +249,7 @@ function EditForm({ task, recurrence, onClose }: EditFormProps) {
         </p>
       )}
 
-      {error && <p className="text-xs text-priority-urgent">{error}</p>}
+      {error && <InlineError message={error} onDismiss={() => setError(null)} />}
 
       <div className="flex items-center justify-between gap-2">
         <Button

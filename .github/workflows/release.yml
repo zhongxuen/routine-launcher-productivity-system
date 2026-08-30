@@ -1,0 +1,82 @@
+# Builds the Windows installers for a tagged version and publishes them as a
+# GitHub Release, together with the signed `latest.json` the in-app updater
+# reads (development-plan.md section 85).
+#
+# The updater endpoint in `src-tauri/tauri.conf.json` points at
+# `releases/latest/download/latest.json`, so the release this produces has to
+# be the *latest* one — which is why it publishes as a draft rather than
+# straight to live. A draft is invisible to `releases/latest`, so nothing is
+# offered to anybody until a human has looked at the artifacts and pressed
+# Publish. See the "Updates" section of README.md.
+#
+# Two secrets have to exist on the repository before this can run:
+#
+#   TAURI_SIGNING_PRIVATE_KEY           the contents of the minisign private
+#                                       key whose public half is the `pubkey`
+#                                       in tauri.conf.json
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password, or an empty string
+#
+# Without them the build still succeeds but produces no signature, and the
+# updater refuses an unsigned manifest — which is the failure mode worth
+# knowing about, because it looks like "the update never appears" rather than
+# like an error.
+
+name: Release
+
+on:
+  push:
+    tags:
+      # Matches the versions `npm run version:set` is willing to write:
+      # major.minor.patch, no pre-release and no build metadata, because the
+      # MSI version field has nowhere to put either.
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # The five files that carry the version have to agree before anything is
+      # built, because the installer takes its number from one of them and the
+      # About card takes its from another. See `scripts/set-version.mjs`.
+      - name: Check the version is consistent
+        run: npm run version:check
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Routine Launcher ${{ github.ref_name }}
+          releaseBody: |
+            Download `Routine Launcher_<version>_x64-setup.exe` and run it. It
+            installs for the current user only and keeps the tasks, routines
+            and focus history of any version already installed.
+          # Draft on purpose — see the note at the top of this file.
+          releaseDraft: true
+          prerelease: false
+          # `createUpdaterArtifacts` in tauri.conf.json is what makes the
+          # signed `.nsis.zip` and `latest.json` exist at all; this action
+          # uploads them alongside the installers.
+          includeUpdaterJson: true

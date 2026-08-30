@@ -1,5 +1,6 @@
-import { AlertCircle, Pause, Play, Square } from "lucide-react";
+import { Pause, Play, Square } from "lucide-react";
 
+import InlineError from "@/components/common/states/InlineError";
 import { Button } from "@/components/ui/button";
 import {
   displaySeconds,
@@ -224,15 +225,7 @@ function RunningClock({
  * the wrong half to keep.
  */
 function SessionError({ message }: { message: string }) {
-  return (
-    <div className="flex items-start gap-2 rounded-md border border-priority-urgent/40 px-3 py-2">
-      <AlertCircle className="mt-0.5 size-4 shrink-0 text-priority-urgent" />
-      <div className="flex flex-col gap-0.5">
-        <p className="text-sm">This session could not be saved.</p>
-        <p className="text-xs text-muted-foreground">{message}</p>
-      </div>
-    </div>
-  );
+  return <InlineError message={`This session could not be saved. ${message}`} />;
 }
 
 /** `"25 minute focus · 5 minute break"`, or just the focus half. */

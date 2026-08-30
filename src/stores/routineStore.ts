@@ -21,8 +21,11 @@
 
 import { create, type StoreApi } from "zustand";
 
+import { playSound } from "@/lib/sounds";
 import { requestFocus } from "@/lib/focus-intent";
+import { emitProgressChanged } from "@/lib/progress-events";
 import { announceDataChanged } from "@/lib/window-sync";
+import { listRoutineStatistics } from "@/services/analyticsService";
 import {
   createRoutine as createRoutineCommand,
   deleteRoutine as deleteRoutineCommand,
@@ -38,6 +41,7 @@ import type {
   RoutineUpdate,
   RoutineWithActions,
 } from "@/types/routine";
+import type { RoutineStatistics } from "@/types/analytics";
 import type { RoutineRun, RoutineRunAction, RoutineRunTask } from "@/types/routine-ui";
 
 interface RoutineState {
@@ -59,7 +63,31 @@ interface RoutineState {
   /** The routine whose statistics panel is open, if any. */
   statisticsRoutineId: number | null;
 
+  /**
+   * Section 33's figures, keyed by routine id.
+   *
+   * Read alongside the routines rather than when a panel opens, because the
+   * cards show two of them ("36h 20m focused · 37 tasks") and would otherwise
+   * pop in a beat after the list. A missing key is a load that has not
+   * finished or has failed; the card falls back to the launch count it
+   * already has rather than showing zeroes it cannot vouch for.
+   */
+  statistics: Record<number, RoutineStatistics>;
+
+  /**
+   * A failed statistics read.
+   *
+   * Kept apart from `error` because the two failures mean different things to
+   * the page: `error` is "there are no routines to show", this is "the
+   * routines are fine, their figures are not". The cards ignore it and fall
+   * back to the launch count on the row; the statistics panel, which is
+   * nothing *but* these figures, reports it and offers a retry.
+   */
+  statisticsError: string | null;
+
   loadRoutines: () => Promise<void>;
+  /** Re-read section 33's figures for every routine. */
+  loadStatistics: () => Promise<void>;
 
   createRoutine: (input: NewRoutine) => Promise<RoutineWithActions>;
   updateRoutine: (id: number, updates: RoutineUpdate) => Promise<RoutineWithActions>;
@@ -129,6 +157,8 @@ export const useRoutineStore = create<RoutineState>((set, get) => ({
   error: null,
   run: null,
   statisticsRoutineId: null,
+  statistics: {},
+  statisticsError: null,
 
   async loadRoutines() {
     // The skeleton is for the first read only. A re-read after a launch or a
@@ -138,6 +168,36 @@ export const useRoutineStore = create<RoutineState>((set, get) => ({
       set({ routines: await listRoutines(), isLoading: false, error: null });
     } catch (cause) {
       set({ isLoading: false, error: String(cause) });
+      return;
+    }
+
+    // Separately, and after the list has already been set: statistics are a
+    // second query, and a routine you cannot see the focus time of is far
+    // better than a page of routines you cannot see at all.
+    await get().loadStatistics();
+  },
+
+  /**
+   * Section 33's figures for every routine, in one query.
+   *
+   * A failure leaves the previous figures in place and is silent on the
+   * cards, which fall back to the launch count on the row. It is *not*
+   * silent in the store, though: the statistics panel is made of nothing
+   * else, and before Stage 13 a failure here left that panel showing its
+   * skeleton for ever with no way to ask again.
+   */
+  async loadStatistics() {
+    set({ statisticsError: null });
+    try {
+      const statistics = await listRoutineStatistics();
+      set({
+        statistics: Object.fromEntries(
+          statistics.map((entry) => [entry.routineId, entry]),
+        ),
+        statisticsError: null,
+      });
+    } catch (cause) {
+      set({ statisticsError: String(cause) });
     }
   },
 
@@ -232,6 +292,10 @@ export const useRoutineStore = create<RoutineState>((set, get) => ({
     // the other one.
     void get().loadRoutines();
     announceDataChanged("routines");
+    // Section 88's once-a-day +10, written by `prepare_launch` before any of
+    // the actions ran. Announced for every launch: only the first of the day
+    // pays, and the caller has no way to know which one that was.
+    emitProgressChanged();
   },
 
   async retryFailedActions() {
@@ -378,9 +442,20 @@ function failWholeRun(
 function settle(set: Set, token: number): void {
   if (token !== runToken) return;
 
+  // Decided inside the updater, acted on outside it: the updater has to stay
+  // a pure function of the state it is handed.
+  let settled: "complete" | "partial" | null = null;
+
   set((state) => {
     if (!state.run) return state;
     const failed = state.run.actions.some((entry) => entry.status === "failure");
-    return { run: { ...state.run, status: failed ? "partial" : "complete" } };
+    settled = failed ? "partial" : "complete";
+    return { run: { ...state.run, status: settled } };
   });
+
+  // The one moment a launch is over, and the only place it is decided — which
+  // is why the cue is here rather than in the dialog. A launch started from
+  // the tray or the quick launcher settles the same way, with section 32's
+  // panel possibly never having been looked at.
+  if (settled) playSound(settled === "partial" ? "routine-failed" : "routine-complete");
 }

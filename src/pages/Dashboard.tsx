@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import DailyQuests from "@/components/dashboard/DailyQuests";
 import FocusWidget from "@/components/dashboard/FocusWidget";
 import ProgressWidget from "@/components/dashboard/ProgressWidget";
 import QuickStart from "@/components/dashboard/QuickStart";
@@ -49,9 +50,10 @@ function useNow(): Date {
  *
  * The vertical order is section 7's stated priority, not the order the
  * mockup happens to draw: today's tasks, then quick routine launching, then
- * focus, then progress. Progress comes last and narrow — sections 7 and 50
- * both put gamification below the productivity system, so it is the only
- * block that does not span the column.
+ * focus, then progress. Progress comes last and paired with section 44's
+ * daily objectives — sections 7 and 50 both put gamification below the
+ * productivity system, so the two gamified blocks are the foot of the page
+ * and nothing above them refers to XP at all.
  */
 function Dashboard() {
   const now = useNow();
@@ -84,7 +86,17 @@ function Dashboard() {
       {/* 3. Focus, then 4. Progress. Both are self-contained cards, so they
           are separated by their own borders rather than another rule. */}
       <FocusWidget />
-      <ProgressWidget className="max-w-sm" />
+
+      {/* Progress and section 44's objectives, side by side on a wide window
+          and stacked on a narrow one — one band of gamification at the foot
+          of the page rather than two blocks the user meets separately.
+          Section 50's hierarchy is a vertical one, so being last is most of
+          what keeps this subordinate; the rest is that both cards are small,
+          muted and unpressable. */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <ProgressWidget />
+        <DailyQuests />
+      </div>
     </div>
   );
 }

@@ -239,6 +239,21 @@ fn open_file(target: &str) -> Result<(), String> {
 fn launch_application(target: &str, arguments: &[String]) -> Result<(), String> {
     let resolved = resolve_executable(target);
     let path = resolved.as_deref().unwrap_or_else(|| Path::new(target));
+
+    // Checked before anything is spawned, because the OS does not describe
+    // this one usefully. `CreateProcess` on a directory fails with "Access is
+    // denied" and on a trailing separator with "program path has no file
+    // name" — two ways of saying "that is a folder" that read as a permission
+    // problem and as a bug respectively. A user who picked the folder instead
+    // of the program inside it gets the same sentence the Folder and File
+    // actions already give them.
+    if path.is_dir() {
+        return Err(format!(
+            "{target} is a folder, not a program. Point this action at the program inside it, \
+             or use a Folder action to open the folder."
+        ));
+    }
+
     let extension = path
         .extension()
         .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
@@ -270,7 +285,7 @@ fn run_command_action(action: &RoutineAction, command_actions_enabled: bool) -> 
 
     // Echo first, unconditionally: section 66 wants the exact command visible,
     // and that is most useful precisely when something went wrong with it.
-    eprintln!("[routine] command action {}: {command_line}", action.id);
+    crate::log_info!("[routine] command action {}: {command_line}", action.id);
 
     let mut result = if !command_actions_enabled {
         ActionResult::new(
@@ -383,12 +398,59 @@ fn spawn_detached(command: &mut Command) -> std::io::Result<()> {
         .map(drop)
 }
 
+/// Windows error codes that mean something a user can act on, and that the
+/// OS's own wording does not make clear.
+///
+/// Named here rather than matched on [`std::io::ErrorKind`] because the kinds
+/// are not specific enough to tell these apart: elevation and a plain refusal
+/// are both `PermissionDenied`, and a malformed path is `Uncategorized`.
+#[cfg(windows)]
+mod launch_error {
+    /// `ERROR_ELEVATION_REQUIRED` — the program has a manifest asking for
+    /// administrator rights.
+    pub const ELEVATION_REQUIRED: i32 = 740;
+    /// `ERROR_INVALID_NAME` — the path is not a path: a character Windows
+    /// does not allow in one, or a malformed drive or share.
+    pub const INVALID_NAME: i32 = 123;
+    /// `ERROR_BAD_EXE_FORMAT` — the file is not a program at all.
+    pub const BAD_EXE_FORMAT: i32 = 193;
+}
+
+/// Turns a spawn failure into the sentence the launch panel shows.
+///
+/// Section 87 asks each action to say why it failed, and "why" has to be a
+/// reason the user can do something about. The raw `io::Error` is not:
+/// `os error 740` is the whole difference between "this is broken" and "this
+/// one needs to be started as an administrator", and nothing in the OS text
+/// says which of the two is worth a retry.
 fn launch_failure_message(target: &str, err: &std::io::Error) -> String {
     if err.kind() == std::io::ErrorKind::NotFound {
-        format!("{target} could not be found. Check the path or use the full path to the program.")
-    } else {
-        format!("{target} could not be started: {err}")
+        return format!(
+            "{target} could not be found. Check the path or use the full path to the program."
+        );
     }
+
+    #[cfg(windows)]
+    match err.raw_os_error() {
+        Some(launch_error::ELEVATION_REQUIRED) => {
+            return format!(
+                "{target} needs administrator rights to start, which a routine cannot give it. \
+                 Start it yourself, or run Routine Launcher as an administrator."
+            )
+        }
+        Some(launch_error::INVALID_NAME) => {
+            return format!(
+                "{target} is not a valid path. Check it for characters Windows does not allow \
+                 in one, such as < > : \" | ? *."
+            )
+        }
+        Some(launch_error::BAD_EXE_FORMAT) => {
+            return format!("{target} is not a program Windows can run.")
+        }
+        _ => {}
+    }
+
+    format!("{target} could not be started: {err}")
 }
 
 // ---------------------------------------------------------------------------
@@ -737,6 +799,91 @@ mod tests {
             resolve_executable("this-program-does-not-exist-9c1f").is_none(),
             "a name that is not on PATH resolves to nothing"
         );
+    }
+
+    /// The broken targets from development-plan.md section 85's test list, run
+    /// through the real executor against the real filesystem.
+    ///
+    /// Every one has to fail with a sentence that names what is wrong, because
+    /// the launch panel shows it verbatim next to a Retry button and a user
+    /// who cannot tell "the drive is not mounted" from "you picked the folder"
+    /// has no way to decide whether retrying is worth anything.
+    #[test]
+    fn a_broken_application_target_says_which_kind_of_broken() {
+        // A folder. Windows answers `CreateProcess` on one with "Access is
+        // denied", which reads as a permission problem and is not one.
+        let windows = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_owned());
+        let error = launch_application(&windows, &[]).unwrap_err();
+        assert!(
+            error.contains("is a folder, not a program"),
+            "a folder should be named as one: {error}"
+        );
+        assert!(!error.contains("os error"), "and should not quote the OS: {error}");
+
+        // The same folder with a trailing separator, which std rejects before
+        // the OS ever sees it ("program path has no file name").
+        let error = launch_application(&format!("{windows}\\"), &[]).unwrap_err();
+        assert!(error.contains("is a folder, not a program"), "{error}");
+
+        // A path that is not a path.
+        let error = launch_application("C:\\bad|name\\app.exe", &[]).unwrap_err();
+        assert!(
+            error.contains("not a valid path"),
+            "invalid characters should be named: {error}"
+        );
+
+        // A drive that is not mounted, and a bare name that is not on PATH:
+        // both are "not found", which is the one message that was already
+        // right and has to stay that way.
+        for target in ["Z:\\nope\\app.exe", "definitely-not-a-program-9c1f"] {
+            let error = launch_application(target, &[]).unwrap_err();
+            assert!(error.contains("could not be found"), "{target}: {error}");
+        }
+    }
+
+    /// `launch_failure_message` is what turns an `io::Error` into that
+    /// sentence, and the codes it special-cases cannot be produced on demand —
+    /// nothing on a test machine reliably needs elevation — so they are
+    /// checked here directly.
+    #[test]
+    #[cfg(windows)]
+    fn a_target_that_needs_elevation_says_so_rather_than_quoting_the_error() {
+        let elevation = std::io::Error::from_raw_os_error(launch_error::ELEVATION_REQUIRED);
+        let message = launch_failure_message("C:\\Tools\\setup.exe", &elevation);
+        assert!(
+            message.contains("administrator rights"),
+            "elevation is the actionable part: {message}"
+        );
+        assert!(message.contains("C:\\Tools\\setup.exe"), "and names the target: {message}");
+        assert!(!message.contains("os error"), "{message}");
+
+        let bad_format = std::io::Error::from_raw_os_error(launch_error::BAD_EXE_FORMAT);
+        assert!(launch_failure_message("notes.txt", &bad_format).contains("not a program"));
+
+        // Anything without a sentence of its own still reports, rather than
+        // being swallowed or mislabelled as one of the cases above.
+        let other = std::io::Error::from_raw_os_error(1);
+        let message = launch_failure_message("app.exe", &other);
+        assert!(message.starts_with("app.exe could not be started:"), "{message}");
+    }
+
+    /// A folder action and a file action pointed at a path that is not mounted,
+    /// and at each other's kind of thing. These are the section 85 cases that
+    /// do not involve spawning anything.
+    #[test]
+    fn a_broken_folder_or_file_target_says_which_kind_of_broken() {
+        let windows = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_owned());
+        let a_real_file = Path::new(&windows).join("explorer.exe");
+        assert!(a_real_file.is_file(), "the test needs a file that exists");
+
+        let error = open_folder(&a_real_file.to_string_lossy()).unwrap_err();
+        assert!(error.contains("is a file, not a folder"), "{error}");
+
+        let error = open_file(&windows).unwrap_err();
+        assert!(error.contains("is a folder, not a file"), "{error}");
+
+        assert!(open_folder("Z:\\nope").unwrap_err().contains("does not exist"));
+        assert!(open_file("Z:\\nope\\notes.txt").unwrap_err().contains("does not exist"));
     }
 
     #[test]

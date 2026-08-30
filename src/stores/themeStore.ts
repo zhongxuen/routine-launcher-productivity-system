@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { withThemeTransition } from "./motionStore";
+
 export type ThemePreference = "light" | "dark" | "system";
 
 const STORAGE_KEY = "routine-launcher.theme";
@@ -38,7 +40,11 @@ export const useThemeStore = create<ThemeState>((set) => ({
   resolved: resolve(readStoredPreference()),
   setPreference: (preference) => {
     localStorage.setItem(STORAGE_KEY, preference);
-    applyToDocument(preference);
+    // Crossfaded rather than switched: flipping every surface in the window
+    // between near-white and near-black on one frame reads as a flash.
+    // `withThemeTransition` is also where that is skipped when the user has
+    // asked for reduced motion — see `motionStore`.
+    withThemeTransition(() => applyToDocument(preference));
     set({ preference, resolved: resolve(preference) });
   },
 }));
@@ -71,7 +77,9 @@ export function initTheme() {
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     const current = useThemeStore.getState().preference;
     if (current !== "system") return;
-    applyToDocument(current);
+    // Windows switching to its night theme under a window the user is looking
+    // at is the case that most wants the crossfade, not least.
+    withThemeTransition(() => applyToDocument(current));
     useThemeStore.setState({ resolved: resolve(current) });
   });
 }

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "launcher",
+  "description": "Capability for the quick launcher overlay (development-plan.md section 28). Core only: the launcher filters routines, launches them, adds a task and asks the main window for a focus session, all through this app's own commands, which are not permission-gated, and needs `core:event` for `launcher://shown` and the cross-window broadcasts. It is not granted the window permissions its own show/hide/resize would need — those are Rust commands, so a search box can never be the thing that decides where an always-on-top window goes.",
+  "windows": [
+    "launcher"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

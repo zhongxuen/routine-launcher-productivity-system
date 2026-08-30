@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Bell, BellOff, Clock, Loader2, Play } from "lucide-react";
 
+import InlineError from "@/components/common/states/InlineError";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -96,7 +97,7 @@ function ReminderPrompt({ reminder, onAction, onClose }: ReminderPromptProps) {
           </p>
         </div>
 
-        {error && <p className="text-xs leading-tight text-priority-urgent">{error}</p>}
+        {error && <InlineError className="px-2 py-1.5 leading-tight" message={error} />}
 
         <div className="flex flex-wrap items-center gap-1.5">
           {reminder.actions.map((action, index) => {

@@ -44,7 +44,7 @@ function Routines() {
         </Button>
       </div>
 
-      <SubNav items={SUB_NAV_ITEMS} />
+      <SubNav items={SUB_NAV_ITEMS} label="Routine views" />
       <Outlet />
 
       <RoutineLaunchDialog />

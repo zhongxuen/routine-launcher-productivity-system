@@ -59,7 +59,10 @@ pub const REMINDER_ACTION_TYPE: &str = "task-reminder";
 
 /// The name the fallback tells the user to go and look in. Matches
 /// `productName` in `tauri.conf.json`.
-const PRODUCT_NAME: &str = "Routine Launcher";
+///
+/// Public because the tray of section 27 heads its menu with the same name,
+/// and two spellings of the product in two surfaces would be one too many.
+pub const PRODUCT_NAME: &str = "Routine Launcher";
 
 /// Section 24's three buttons.
 ///
@@ -188,6 +191,24 @@ pub fn for_focus_session(session: &FocusSession) -> FocusCompleteNotification {
         title: "✅ Focus session complete".to_owned(),
         body,
     }
+}
+
+/// The one-off notice that closing the window did not close the app
+/// (development-plan.md section 27).
+///
+/// Shown the first time the main window is closed to the tray and never
+/// again. A window that vanishes while the process keeps running is the one
+/// genuinely surprising thing about a tray app, and the surprise is worth
+/// exactly one sentence — after which the behaviour is learned, and a toast
+/// every time would be nagging. The Settings toggle is named in the body
+/// because a user who does not want this needs to know where to turn it off.
+pub fn minimized_to_tray() -> (String, String) {
+    (
+        format!("{PRODUCT_NAME} is still running"),
+        "It is in the notification area — click the icon to bring it back. \
+         Turn this off in Settings to quit on close instead."
+            .to_owned(),
+    )
 }
 
 /// A one-off notification for the Settings page's "send a test" button, so a

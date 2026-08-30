@@ -6,13 +6,14 @@ const SUB_NAV_ITEMS = [
   { to: "/cleanup/desktop", label: "Desktop" },
   { to: "/cleanup/duplicates", label: "Duplicates" },
   { to: "/cleanup/large-files", label: "Large Files" },
+  { to: "/cleanup/screenshots", label: "Screenshots" },
 ];
 
 function Cleanup() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-2xl font-semibold tracking-tight">Cleanup</h1>
-      <SubNav items={SUB_NAV_ITEMS} />
+      <SubNav items={SUB_NAV_ITEMS} label="Cleanup views" />
       <Outlet />
     </div>
   );

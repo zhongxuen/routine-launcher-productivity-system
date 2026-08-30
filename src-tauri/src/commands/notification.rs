@@ -205,7 +205,7 @@ pub fn start_scheduler(app: AppHandle) {
             thread::sleep(POLL_INTERVAL);
 
             if let Err(error) = deliver_due_reminders(&app) {
-                eprintln!("[notification] could not check reminders: {error}");
+                crate::log_error!("[notification] could not check reminders: {error}");
             }
         });
 
@@ -213,7 +213,7 @@ pub fn start_scheduler(app: AppHandle) {
         // Reminders are then only as good as `check_task_reminders`, which
         // the frontend still calls — worth saying loudly, not worth refusing
         // to start the app over.
-        eprintln!("[notification] reminder scheduler could not start: {error}");
+        crate::log_error!("[notification] reminder scheduler could not start: {error}");
     }
 }
 
@@ -230,10 +230,25 @@ pub fn announce_focus_session(app: &AppHandle, session: &FocusSession) {
     let notification = notifications::for_focus_session(session);
 
     if let Err(error) = show(app, &notification.title, &notification.body, None) {
-        eprintln!(
+        crate::log_error!(
             "[notification] could not announce focus session {}: {error}",
             session.id
         );
+    }
+}
+
+/// Tells the user, once, that closing the window put the app in the tray
+/// rather than quitting it (development-plan.md section 27).
+///
+/// Called from `on_window_event` in `lib.rs`, which owns the "once" —
+/// `tray::should_announce_minimize` records that it has been said. Failure is
+/// logged and nothing else: the window is already hidden by this point, and a
+/// notice the OS would not show is not a reason to keep it on screen.
+pub fn announce_minimized_to_tray(app: &AppHandle) {
+    let (title, body) = notifications::minimized_to_tray();
+
+    if let Err(error) = show(app, &title, &body, None) {
+        crate::log_error!("[notification] could not announce the tray: {error}");
     }
 }
 
@@ -277,7 +292,7 @@ fn deliver_due_reminders(app: &AppHandle) -> Result<Vec<ReminderNotification>, S
             &notification.body,
             Some(REMINDER_ACTION_TYPE),
         ) {
-            eprintln!(
+            crate::log_error!(
                 "[notification] could not show the reminder for task {}: {error}",
                 notification.task_id
             );
@@ -294,7 +309,7 @@ fn deliver_due_reminders(app: &AppHandle) -> Result<Vec<ReminderNotification>, S
         // exists for — so a failed emit is reported and the reminder still
         // counts as delivered.
         if let Err(error) = app.emit(REMINDER_FIRED_EVENT, &notification) {
-            eprintln!("[notification] could not emit {REMINDER_FIRED_EVENT}: {error}");
+            crate::log_error!("[notification] could not emit {REMINDER_FIRED_EVENT}: {error}");
         }
 
         delivered.push(notification);

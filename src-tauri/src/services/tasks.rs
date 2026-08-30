@@ -21,6 +21,7 @@ use super::reminders::{self, TaskReminder};
 use super::routines;
 use super::serde_util::double_option;
 use super::task_recurrence::{self, NewRecurrence};
+use super::xp;
 use super::validate::{
     normalize_text, optional_integer, optional_text, validate_optional_date,
     validate_optional_time,
@@ -50,6 +51,27 @@ const SUPERSEDED_PREDICATE: &str = "EXISTS (SELECT 1 FROM tasks AS newer \
 fn overdue_predicate() -> String {
     format!(
         "due_date < date('now', 'localtime') AND status IN ('todo', 'in_progress') \
+         AND NOT {SUPERSEDED_PREDICATE}"
+    )
+}
+
+/// The work still owed by the end of `bound` (a SQL expression yielding a
+/// `YYYY-MM-DD` date): open, due by then, and not replaced by a later
+/// instance of its series.
+///
+/// The same idea as [`overdue_predicate`] with the day it is asked about left
+/// open, which is what the statistics of development-plan.md section 36 need:
+/// the denominator of "Tasks: 6 / 8" is the work that was on the plate for
+/// the window, and a window can end today or on Sunday. Both spellings share
+/// [`SUPERSEDED_PREDICATE`], so a superseded Monday instance is left out of
+/// the Today view and out of the week's total by the same rule rather than by
+/// two rules that happen to agree.
+///
+/// Assumes the outer query reads the table as `tasks` — the superseded check
+/// is a correlated subquery against that name.
+pub(super) fn owed_by_predicate(bound: &str) -> String {
+    format!(
+        "due_date <= {bound} AND status IN ('todo', 'in_progress') \
          AND NOT {SUPERSEDED_PREDICATE}"
     )
 }
@@ -584,6 +606,10 @@ pub fn update(conn: &Connection, id: i64, update: TaskUpdate) -> ServiceResult<T
         values.push(optional_integer(validate_routine(conn, routine_id)?));
     }
 
+    // Set when this save is the moment the task becomes done, so the XP for
+    // it is awarded once the row is actually written — see below.
+    let mut newly_completed = false;
+
     if let Some(status) = update.status {
         assignments.push("status = ?");
         values.push(Value::Text(status.as_str().to_owned()));
@@ -597,6 +623,7 @@ pub fn update(conn: &Connection, id: i64, update: TaskUpdate) -> ServiceResult<T
             (_, TaskStatus::Completed) => {
                 assignments.push("completed_at = ?");
                 values.push(Value::Text(db_now(conn)?));
+                newly_completed = true;
             }
             (TaskStatus::Completed, _) => {
                 assignments.push("completed_at = ?");
@@ -616,6 +643,23 @@ pub fn update(conn: &Connection, id: i64, update: TaskUpdate) -> ServiceResult<T
         let sql = format!("UPDATE tasks SET {} WHERE id = ?", assignments.join(", "));
         conn.execute(&sql, params_from_iter(values))
             .map_err(|err| ServiceError::from_constraint(err, MISSING_CATEGORY))?;
+    }
+
+    // Section 43's +10 XP, awarded here because this transition is the one
+    // place a task becomes done — the Tasks list, the popup, the tray's
+    // "Complete" and Stage 5's focus finish all arrive through this function.
+    // Inside the transaction so the grant and the completion land together,
+    // and behind `xp::note` so a progression failure can never undo the
+    // completion that earned it (section 50).
+    //
+    // `award_task_completion` is itself once-per-task, which is what makes
+    // un-ticking and re-ticking a checkbox worth nothing the second time
+    // (section 88).
+    if newly_completed {
+        xp::note(
+            xp::award_task_completion(conn, id),
+            &format!("completing task {id}"),
+        );
     }
 
     let task = get(conn, id)?.ok_or_else(|| task_not_found(id))?;

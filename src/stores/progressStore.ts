@@ -1,61 +1,43 @@
 /**
- * Progress store — level, XP and streak for the dashboard's Progress widget.
+ * Progress store — level, XP, streak and achievements.
  *
- * ---------------------------------------------------------------------------
- * THIS STORE IS A PLACEHOLDER. Its values are made up.
+ * Everything here comes from `src/services/xpService.ts`, the same way the
+ * task store goes through `taskService` and the focus store through
+ * `focusService`. Nothing in this file holds an opinion about progression
+ * that the backend does not also hold: the level curve, the streak rule of
+ * section 46 and the six achievement unlocks of section 47 are all decided
+ * behind that service, and this store's whole job is to ask, to keep the
+ * answer, and to say so when the asking fails.
  *
- * The progression backend is Stage 9 (development-plan.md sections 43-47);
- * Stage 6 deliberately does not wait for it, because the dashboard's other
- * three widgets are real and the plan puts gamification last on purpose
- * (section 50: "Gamification should be visually secondary").
+ * (The service is mock-backed until Stage 9's prompt 9.1 builds the Rust
+ * side. That is stated once, at the top of the service, and is invisible from
+ * here on purpose — see the banner in `xpService.ts`. This store is not a
+ * placeholder, and there is nothing left in it to swap.)
  *
- * What is *not* a placeholder is the shape. `ProgressWidget` reads this store
- * and takes no data props, so Stage 9's prompt 9.1 replaces the body of
- * `loadProgress` with an `xpService` call — the level command it specifies
- * already answers in {@link LevelProgress}'s three fields, and the `streaks`
- * row already carries {@link StreakProgress}'s three — and the widget is not
- * touched at all. That is the single integration point Stage 6 leaves open.
- *
- * Which means: when this store becomes real, delete MOCK_PROGRESS and the
- * comment above it, and nothing else here should need to move.
- * ---------------------------------------------------------------------------
+ * Two reads rather than one, each with its own loading and error state, in
+ * the shape `focusStore` uses for its history: the dashboard's Progress
+ * widget mounts on every visit and wants the numbers, while the six
+ * achievement tiles are a page the user has to go to. Folding them into one
+ * call would make the dashboard pay for a grid it is not drawing.
  */
 
 import { create } from "zustand";
 
-import { todayKey } from "@/lib/task-utils";
-import type { Progress } from "@/types/progress";
-
-/**
- * The numbers from the section 7 and section 45 mockups — level 4, 620 of
- * 800 XP, a five-day streak — so the widget on screen is the widget in the
- * plan rather than a different one that happens to render.
- *
- * `totalXp` is the only value the mockups do not give; 2020 is 620 on top of
- * an invented 1400 for the first three levels. It is consistent with the
- * rest, and no more real than the rest.
- *
- * The streak's last active day is computed rather than written down: a fixed
- * date would quietly become "five days ending some time last year" the longer
- * this placeholder lives, and a mock that ages badly is worse than a mock.
- */
-const MOCK_PROGRESS: Progress = {
-  level: { level: 4, xpIntoLevel: 620, xpForNextLevel: 800 },
-  streak: { currentStreak: 5, longestStreak: 11, lastActiveDate: todayKey() },
-  totalXp: 2020,
-};
+import { listAchievements, getProgress } from "@/services/xpService";
+import type { Achievement, Progress } from "@/types/progress";
 
 interface ProgressState {
   /** Level, XP and streak. Null until the first load resolves. */
   progress: Progress | null;
   /** True only while progress is being read for the first time. */
   isLoading: boolean;
-  /**
-   * A failed read. Always null today — there is nothing here that can fail
-   * yet — but the widget already renders it, so the Stage 9 swap does not
-   * have to add an error path to a component at the same time as data.
-   */
+  /** A failed read, already in user-presentable form. */
   error: string | null;
+
+  /** Section 47's six, locked ones included. Empty until the first load. */
+  achievements: Achievement[];
+  isAchievementsLoading: boolean;
+  achievementsError: string | null;
 
   /**
    * Reads level, XP and streak.
@@ -65,21 +47,55 @@ interface ProgressState {
    * the last one.
    */
   loadProgress: () => Promise<void>;
+
+  /** Reads the achievement grid. Same contract as {@link loadProgress}. */
+  loadAchievements: () => Promise<void>;
 }
 
 export const useProgressStore = create<ProgressState>((set, get) => ({
   progress: null,
-  isLoading: false,
+  // `true`, not `false`: nothing has been read yet, and "no numbers" before
+  // the first read is a wait rather than a result. Every component that reads
+  // this store calls its loader on mount, so the flag is honest from the
+  // first frame — and without it the widgets flash their *error* state for
+  // one render, because "no data and not loading" is otherwise
+  // indistinguishable from "the read came back empty-handed".
+  isLoading: true,
   error: null,
+
+  achievements: [],
+  isAchievementsLoading: true,
+  achievementsError: null,
 
   async loadProgress() {
     // Only the *first* read is a loading state; later ones leave the numbers
     // that are already on screen alone rather than blanking them to skeletons.
     set({ isLoading: get().progress === null, error: null });
 
-    // Stage 9: replace with the xpService calls. Kept async even though there
-    // is nothing to await, so that swap changes this function's body and not
-    // its signature — or any of its callers.
-    set({ progress: MOCK_PROGRESS, isLoading: false, error: null });
+    try {
+      set({ progress: await getProgress(), isLoading: false, error: null });
+    } catch (cause) {
+      // The previous numbers are kept. Stale XP is still worth looking at,
+      // and the widget states the staleness under them rather than instead
+      // of them.
+      set({ isLoading: false, error: String(cause) });
+    }
+  },
+
+  async loadAchievements() {
+    set({
+      isAchievementsLoading: get().achievements.length === 0,
+      achievementsError: null,
+    });
+
+    try {
+      set({
+        achievements: await listAchievements(),
+        isAchievementsLoading: false,
+        achievementsError: null,
+      });
+    } catch (cause) {
+      set({ isAchievementsLoading: false, achievementsError: String(cause) });
+    }
   },
 }));

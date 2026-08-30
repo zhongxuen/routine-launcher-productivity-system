@@ -20,7 +20,7 @@ function Focus() {
         <h1 className="text-2xl font-semibold tracking-tight">Focus</h1>
         {session && <RunningSessionPill session={session} />}
       </div>
-      <SubNav items={SUB_NAV_ITEMS} />
+      <SubNav items={SUB_NAV_ITEMS} label="Focus views" />
       <Outlet />
     </div>
   );

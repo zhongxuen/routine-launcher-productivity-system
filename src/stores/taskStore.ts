@@ -23,6 +23,7 @@
 import { create, type StoreApi } from "zustand";
 
 import { todayKey } from "@/lib/task-utils";
+import { emitProgressChanged } from "@/lib/progress-events";
 import { announceDataChanged } from "@/lib/window-sync";
 import {
   createTask as createTaskCommand,
@@ -202,6 +203,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     const updated = await updateTaskCommand(id, patch);
     await get().refresh();
     announceDataChanged("tasks");
+    // Section 94's last arrow. `update` awards section 43's +10 the moment a
+    // task enters `completed`, so the figures on the dashboard are already
+    // out of date by the time this returns — see `src/lib/progress-events.ts`
+    // for why they are told rather than read from here.
+    emitProgressChanged();
     return updated;
   },
 

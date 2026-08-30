@@ -25,6 +25,7 @@ use super::error::{ServiceError, ServiceResult};
 use super::serde_util::double_option;
 use super::settings;
 use super::validate::{normalize_text, optional_text};
+use super::xp;
 
 /// Settings key for the section 66 opt-in that gates `command` actions.
 /// Absent means disabled — see [`command_actions_enabled`].
@@ -281,6 +282,50 @@ pub fn list(conn: &Connection) -> ServiceResult<Vec<Routine>> {
             routine.actions.push(action);
         }
     }
+
+    Ok(routines)
+}
+
+/// Just enough of a routine to put it on a menu: what it is called and which
+/// glyph it wears. Returned by [`top_by_use`].
+#[derive(Debug, Clone, Serialize)]
+pub struct RoutineSummary {
+    pub id: i64,
+    pub name: String,
+    pub icon: Option<String>,
+}
+
+/// The routines a shortcut surface should offer, most-used first.
+///
+/// Launch count is the ranking, ties break on the most recently launched and
+/// then on name — the same rule `quickStartRoutines` applies in the frontend
+/// (`src/components/dashboard/QuickStart.tsx`), so section 27's tray menu, the
+/// dashboard's QUICK START row and the popup's launch button can never
+/// disagree about which workspace is the obvious one. A user who has launched
+/// nothing yet still gets a list, ordered by name, rather than an empty menu
+/// that only fills in once they have used the feature somewhere else.
+///
+/// Ordered and limited in SQL rather than by reading [`list`] and slicing it,
+/// because the caller wants the top few and nothing about their actions — a
+/// menu item is a name and an icon.
+pub fn top_by_use(conn: &Connection, limit: usize) -> ServiceResult<Vec<RoutineSummary>> {
+    let mut statement = conn.prepare(
+        "SELECT id, name, icon FROM routines \
+         ORDER BY launch_count DESC, \
+                  last_launched_at IS NULL, last_launched_at DESC, \
+                  name COLLATE NOCASE \
+         LIMIT ?1",
+    )?;
+
+    let routines = statement
+        .query_map(params![limit as i64], |row| {
+            Ok(RoutineSummary {
+                id: row.get("id")?,
+                name: row.get("name")?,
+                icon: row.get("icon")?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<RoutineSummary>>>()?;
 
     Ok(routines)
 }
@@ -673,6 +718,30 @@ pub fn prepare_launch(conn: &Connection, routine_id: i64) -> ServiceResult<Routi
           WHERE id = ?1",
         params![routine_id],
     )?;
+
+    // The same launch, dated, for the windowed statistics of sections 36 and
+    // 82 — "Routines: 4" today, "Most used routine" this week. The counter
+    // above answers "how many, ever" and cannot be asked "how many, today";
+    // see `0007_routine_launches.sql` for why the two live side by side
+    // instead of one being derived from the other. Written in this
+    // transaction so a launch can never be counted by one and missed by the
+    // other.
+    transaction.execute(
+        "INSERT INTO routine_launches (routine_id) VALUES (?1)",
+        params![routine_id],
+    )?;
+
+    // Section 88's rule, and the reason it is written here rather than after
+    // the run: a launch is counted the moment it is started (see this
+    // function's own docs), and its reward is counted with it. Only the first
+    // launch of the local day pays out — `award_routine_launch` asks the
+    // ledger, so the second, fifth and twentieth launch all quietly earn
+    // nothing and still launch. Behind `xp::note` so a progression failure
+    // cannot stop a workspace from opening (section 50).
+    xp::note(
+        xp::award_routine_launch(&transaction, routine_id),
+        &format!("launching routine {routine_id}"),
+    );
 
     let routine = get(&transaction, routine_id)?.ok_or_else(|| routine_not_found(routine_id))?;
     let plan = RoutineLaunchPlan {
@@ -1275,6 +1344,59 @@ mod tests {
             prepare_retry(&conn, routine.id, &[9999]),
             Err(ServiceError::NotFound(_))
         ));
+    }
+
+    #[test]
+    fn top_by_use_ranks_by_launches_and_falls_back_to_name() {
+        let conn = init_memory_db().unwrap();
+
+        let named = |name: &str| {
+            create(
+                &conn,
+                NewRoutine {
+                    name: name.to_owned(),
+                    description: None,
+                    icon: None,
+                    actions: vec![action(RoutineActionType::Url, "example.com")],
+                },
+            )
+            .unwrap()
+        };
+
+        // Deliberately not in alphabetical order, so the fallback is doing
+        // something rather than agreeing with insertion order by accident.
+        let work = named("Work");
+        let coding = named("Coding");
+        let study = named("Study");
+
+        let names = |routines: Vec<RoutineSummary>| {
+            routines
+                .into_iter()
+                .map(|routine| routine.name)
+                .collect::<Vec<_>>()
+        };
+
+        // Nobody has launched anything: the menu is still offered, by name.
+        assert_eq!(
+            names(top_by_use(&conn, 5).unwrap()),
+            vec!["Coding", "Study", "Work"]
+        );
+
+        prepare_launch(&conn, study.id).unwrap();
+        prepare_launch(&conn, study.id).unwrap();
+        prepare_launch(&conn, work.id).unwrap();
+
+        assert_eq!(
+            names(top_by_use(&conn, 5).unwrap()),
+            vec!["Study", "Work", "Coding"]
+        );
+
+        // The limit is what keeps a tray menu from becoming the routine list.
+        assert_eq!(names(top_by_use(&conn, 2).unwrap()), vec!["Study", "Work"]);
+
+        // A routine with no launches sorts below one that has some, whatever
+        // its name — `coding` is first alphabetically and still last here.
+        assert_eq!(coding.launch_count, 0);
     }
 
     #[test]

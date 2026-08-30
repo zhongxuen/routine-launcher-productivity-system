@@ -3,6 +3,8 @@ import { toast } from "sonner";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { phaseClass, type ItemPhase } from "@/hooks/useAnimatedList";
+import { playSound } from "@/lib/sounds";
 import { formatDueTime, formatOverdue, PRIORITY_DOT } from "@/lib/task-utils";
 import { cn } from "@/lib/utils";
 import { useTaskStore } from "@/stores/taskStore";
@@ -13,6 +15,8 @@ export const TASKS_TODAY_PATH = "/tasks/today";
 
 interface DashboardTaskRowProps {
   task: Task;
+  /** Where the row is in its life on screen, from `TodaysTasks`. */
+  phase?: ItemPhase;
 }
 
 /**
@@ -30,7 +34,7 @@ interface DashboardTaskRowProps {
  * from here: tick a task off, which is the real mutation and not a preview of
  * one, and open the task where it lives.
  */
-function DashboardTaskRow({ task }: DashboardTaskRowProps) {
+function DashboardTaskRow({ task, phase = "present" }: DashboardTaskRowProps) {
   const toggleTaskCompletion = useTaskStore((state) => state.toggleTaskCompletion);
 
   const isCompleted = task.status === "completed";
@@ -40,6 +44,10 @@ function DashboardTaskRow({ task }: DashboardTaskRowProps) {
   async function handleToggle() {
     try {
       await toggleTaskCompletion(task.id);
+      // The same cue the Tasks page plays, for the same action — the two
+      // lists are two views of one thing, and a task ticked off here should
+      // not sound different from the same task ticked off there.
+      if (!isCompleted) playSound("task-complete");
     } catch (cause) {
       // The checkbox reflects the stored status, so it snaps back by itself
       // when the write fails; the toast is what explains the snap-back.
@@ -50,7 +58,12 @@ function DashboardTaskRow({ task }: DashboardTaskRowProps) {
   }
 
   return (
-    <li className="flex items-center gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-accent/50">
+    <li
+      className={cn(
+        "flex items-center gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-accent/50",
+        phaseClass(phase),
+      )}
+    >
       <Checkbox
         id={`dashboard-task-${task.id}`}
         checked={isCompleted}

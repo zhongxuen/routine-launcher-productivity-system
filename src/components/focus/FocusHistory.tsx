@@ -1,8 +1,10 @@
 import { useEffect } from "react";
-import { AlertCircle } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Timer } from "lucide-react";
 
+import AsyncBody from "@/components/common/states/AsyncBody";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { FOCUS_TIMER_PATH } from "@/hooks/useStartFocus";
 import { formatFocusLength, sortSessionsByRecency } from "@/lib/focus-utils";
 import { useFocusStore } from "@/stores/focusStore";
 
@@ -48,71 +50,33 @@ function FocusHistory() {
         </p>
       </header>
 
-      <HistoryBody isLoading={isLoading} error={error} onRetry={() => void loadHistory()} isEmpty={sessions.length === 0}>
+      <AsyncBody
+        isLoading={isLoading}
+        error={error}
+        onRetry={() => void loadHistory()}
+        isEmpty={sessions.length === 0}
+        loadingLabel="Loading your focus history"
+        skeletonRows={3}
+        skeletonRowClassName="h-10 w-full"
+        skeletonClassName="flex flex-col gap-3 px-2"
+        errorTitle="Could not load your focus history."
+        emptyIcon={Timer}
+        emptyTitle="No focus sessions yet."
+        emptyHint="Sessions appear here as soon as you finish one."
+        emptyAction={
+          <Button size="sm" variant="outline" asChild>
+            <Link to={FOCUS_TIMER_PATH}>Start a session</Link>
+          </Button>
+        }
+      >
         <ul className="flex flex-col">
           {sessions.map((session) => (
             <FocusSessionRow key={session.id} session={session} />
           ))}
         </ul>
-      </HistoryBody>
+      </AsyncBody>
     </div>
   );
-}
-
-/**
- * The three things that can be under the heading instead of the list, in the
- * same shape `TaskViewBody` gives the task views.
- */
-function HistoryBody({
-  isLoading,
-  error,
-  onRetry,
-  isEmpty,
-  children,
-}: {
-  isLoading: boolean;
-  error: string | null;
-  onRetry: () => void;
-  isEmpty: boolean;
-  children: React.ReactNode;
-}) {
-  if (isLoading) {
-    return (
-      <div className="flex flex-col gap-3 px-2">
-        {[0, 1, 2].map((row) => (
-          <Skeleton key={row} className="h-10 w-full" />
-        ))}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-14 text-center">
-        <AlertCircle className="size-5 text-priority-urgent" />
-        <div className="flex flex-col gap-1">
-          <p className="text-sm">Could not load your focus history.</p>
-          <p className="max-w-md text-xs text-muted-foreground">{error}</p>
-        </div>
-        <Button size="sm" variant="outline" onClick={onRetry}>
-          Try again
-        </Button>
-      </div>
-    );
-  }
-
-  if (isEmpty) {
-    return (
-      <div className="flex flex-col items-center gap-1 py-14 text-center">
-        <p className="text-sm text-muted-foreground">No focus sessions yet.</p>
-        <p className="text-xs text-muted-foreground/70">
-          Sessions appear here as soon as you finish one.
-        </p>
-      </div>
-    );
-  }
-
-  return <>{children}</>;
 }
 
 export default FocusHistory;

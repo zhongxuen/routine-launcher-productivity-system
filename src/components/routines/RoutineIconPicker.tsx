@@ -35,7 +35,7 @@ function RoutineIconPicker({ value, onChange, idPrefix }: RoutineIconPickerProps
 
       <Popover>
         <PopoverTrigger
-          className="w-fit cursor-pointer rounded-lg outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="w-fit cursor-pointer rounded-lg outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
           aria-label="Choose an icon"
         >
           <RoutineIcon icon={value} className="size-9 hover:bg-accent" />

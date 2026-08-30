@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { PanelsTopLeft } from "lucide-react";
 
+import EmptyState from "@/components/common/states/EmptyState";
+import ErrorState from "@/components/common/states/ErrorState";
+import InlineError from "@/components/common/states/InlineError";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useWindowSync } from "@/hooks/useWindowSync";
+import { hasOpenOverlay } from "@/lib/keyboard";
 import { completionCounts, sortTasks } from "@/lib/task-utils";
-import { focusMainWindow, onPopupShown } from "@/services/popupService";
+import { dismissPopupWindow, focusMainWindow, onPopupShown } from "@/services/popupService";
 import { useRoutineStore } from "@/stores/routineStore";
 import { useTaskStore } from "@/stores/taskStore";
+import { refreshMotion } from "@/stores/motionStore";
+import { refreshSound } from "@/stores/soundStore";
 import { refreshTheme } from "@/stores/themeStore";
 import type { Task } from "@/types/task";
 
@@ -104,6 +110,8 @@ function PopupWindow() {
 
     void onPopupShown(() => {
       refreshTheme();
+      refreshMotion();
+      refreshSound();
       reload();
     })
       .then((fn) => {
@@ -125,6 +133,42 @@ function PopupWindow() {
     window.addEventListener("focus", reload);
     return () => window.removeEventListener("focus", reload);
   }, [reload]);
+
+  // Escape puts the popup away (development-plan.md section 84), the same key
+  // that closes the quick launcher and every dialog in the app.
+  //
+  // It matters more here than anywhere else. This window has no title bar of
+  // its own to close, it is always on top, and it is summoned from the tray or
+  // a keystroke — so before this the only way out was to find its edge with
+  // the mouse. Bound on the window rather than a wrapper because there is no
+  // focus trap in a window that *is* the surface; whatever is focused, Escape
+  // means the same thing.
+  //
+  // It defers to whatever is already on top of the list, in the two ways
+  // those things announce themselves:
+  //
+  // * `defaultPrevented` — the quick-add field below clears itself on Escape
+  //   and stops the event, so a half-typed task costs one press to abandon and
+  //   a second to close the window.
+  // * An open Radix layer — the "start a different routine" menu is a portal,
+  //   and Radix dismisses it from a capture-phase listener without marking the
+  //   event, so the only way to know is to look. It is still in the DOM when
+  //   this runs (React has not re-rendered yet), which is exactly the answer
+  //   wanted: this press closes the menu, the next one closes the window.
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (hasOpenOverlay()) return;
+
+      event.preventDefault();
+      void dismissPopupWindow().catch((cause: unknown) => {
+        console.error("Could not dismiss the popup:", cause);
+      });
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   async function handleToggle(task: Task) {
     setBusyTaskId(task.id);
@@ -204,7 +248,11 @@ function PopupWindow() {
 
       <footer className="flex flex-col gap-2 px-3 py-3">
         {writeError && (
-          <p className="text-[11px] leading-tight text-priority-urgent">{writeError}</p>
+          <InlineError
+            className="px-2 py-1.5 text-[11px] leading-tight"
+            message={writeError}
+            onDismiss={() => setWriteError(null)}
+          />
         )}
 
         <PopupQuickAdd onAdded={() => setWriteError(null)} />
@@ -245,9 +293,10 @@ interface PopupBodyProps {
 function PopupBody({ isLoading, error, onRetry, tasks, busyTaskId, onToggle }: PopupBodyProps) {
   if (isLoading) {
     return (
-      <ul className="flex flex-col gap-1 px-2">
+      <ul role="status" aria-busy className="flex flex-col gap-1 px-2">
+        <li className="sr-only">Loading today&apos;s tasks</li>
         {Array.from({ length: 4 }, (_, index) => (
-          <li key={index} className="flex items-center gap-2.5 py-1.5">
+          <li key={index} className="flex items-center gap-2.5 py-1.5" aria-hidden>
             <Skeleton className="size-4 rounded" />
             <Skeleton className="h-3 flex-1" />
           </li>
@@ -258,21 +307,17 @@ function PopupBody({ isLoading, error, onRetry, tasks, busyTaskId, onToggle }: P
 
   if (error) {
     return (
-      <div className="flex flex-col items-start gap-2 px-2 py-3">
-        <p className="text-xs text-muted-foreground">Could not read today's tasks.</p>
-        <Button size="xs" variant="outline" onClick={onRetry}>
-          Try again
-        </Button>
-      </div>
+      <ErrorState
+        className="gap-2 px-2 py-6"
+        title="Could not read today's tasks."
+        message={error}
+        onRetry={onRetry}
+      />
     );
   }
 
   if (tasks.length === 0) {
-    return (
-      <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-        Nothing scheduled for today.
-      </p>
-    );
+    return <EmptyState className="py-8" title="Nothing scheduled for today." />;
   }
 
   return (

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import InlineError from "@/components/common/states/InlineError";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -221,7 +222,7 @@ function RoutineBuilder({ routine }: RoutineBuilderProps) {
         </Button>
       </div>
 
-      {saveError && <p className="text-xs text-priority-urgent">{saveError}</p>}
+      {saveError && <InlineError message={saveError} />}
 
       <div className="flex items-center gap-2">
         <Button type="submit" disabled={isSaving || !canSave}>

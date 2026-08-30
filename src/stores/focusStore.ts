@@ -47,15 +47,28 @@
  * running, which is exactly what makes `restoreSession` safe: an open session
  * at that point is always one *this* run started.
  * ---------------------------------------------------------------------------
+ *
+ * One more thing happens on start, pause, resume and finish, and it is there
+ * because section 26's desktop widget is a second webview holding a second
+ * copy of this store. Each of those four announces the clock's new state to
+ * the app's other windows, which adopt it through `adoptSession`. Re-reading
+ * the database would not do: pausing is arithmetic here rather than a column
+ * there, so a window that only heard "something changed" would resume a
+ * paused session and count minutes nobody focused. See `src/lib/focus-sync.ts`.
  */
 
 import { create, type StoreApi } from "zustand";
 
 import { emitFocusSessionEnded } from "@/lib/focus-events";
+import { announceFocusSession } from "@/lib/focus-sync";
 import { hasReachedTarget, sortSessionsByRecency, sqliteTimestamp } from "@/lib/focus-utils";
+import { playSound } from "@/lib/sounds";
+import { emitProgressChanged } from "@/lib/progress-events";
+import { announceDataChanged } from "@/lib/window-sync";
 import {
   endFocusSession,
   getActiveFocusSession,
+  getFocusSession,
   listFocusHistory,
   newFocusSession,
   startFocusSession,
@@ -142,6 +155,22 @@ interface FocusState {
    * call from an effect that remounts.
    */
   restoreSession: () => Promise<void>;
+
+  /**
+   * Takes on the clock as another window reports it (section 26's widget).
+   *
+   * The counterpart of the announcements the four actions above make. There
+   * is one focus session, and a second webview holding a second copy of this
+   * store must show the same one — including whether it is paused, which is
+   * the one thing about a running session that `focus_sessions` does not
+   * record. So the reported state is adopted whole rather than merged with
+   * anything local: the window that changed the clock is the one that knows
+   * what it says. See `src/lib/focus-sync.ts`.
+   *
+   * Announces nothing itself, which is what keeps two windows from echoing a
+   * pause back and forth forever.
+   */
+  adoptSession: (session: ActiveFocusSession | null) => void;
 
   loadHistory: () => Promise<void>;
 }
@@ -258,6 +287,10 @@ export const useFocusStore = create<FocusState>((set, get) => ({
     });
 
     startTicking(set, get);
+    // `start_focus_session` closes anything already running, so a second
+    // window holding the session this one just replaced has to hear about it
+    // before its clock counts another second against a row that has ended.
+    announceFocusSession(session);
   },
 
   pauseSession() {
@@ -269,14 +302,17 @@ export const useFocusStore = create<FocusState>((set, get) => ({
     // The elapsed count is frozen by recording *when* the pause began: from
     // here on, `elapsedSecondsOf` measures to that instant instead of to now.
     const pausedAtMs = Date.now();
-    set({
-      session: {
-        ...session,
-        status: "paused",
-        pausedAtMs,
-        elapsedSeconds: elapsedSecondsOf(session, pausedAtMs),
-      },
-    });
+    const paused: ActiveFocusSession = {
+      ...session,
+      status: "paused",
+      pausedAtMs,
+      elapsedSeconds: elapsedSecondsOf(session, pausedAtMs),
+    };
+
+    set({ session: paused });
+    // Nothing is written for a pause — it is arithmetic about a clock, not a
+    // fact about a row — so the other window can only learn of it here.
+    announceFocusSession(paused);
   },
 
   resumeSession() {
@@ -287,16 +323,19 @@ export const useFocusStore = create<FocusState>((set, get) => ({
     // subtracted from wall-clock time for the rest of the session. Paused
     // minutes are not focused minutes, and section 88 would rather the number
     // be smaller than wrong.
-    set({
-      session: {
-        ...session,
-        status: "running",
-        pausedMs: session.pausedMs + (Date.now() - session.pausedAtMs),
-        pausedAtMs: null,
-      },
-    });
+    const resumed: ActiveFocusSession = {
+      ...session,
+      status: "running",
+      pausedMs: session.pausedMs + (Date.now() - session.pausedAtMs),
+      pausedAtMs: null,
+    };
+
+    set({ session: resumed });
 
     startTicking(set, get);
+    // `pausedMs` is the whole reason this travels: a window that only heard
+    // "running again" would go on counting the minutes spent paused.
+    announceFocusSession(resumed);
   },
 
   async finishSession() {
@@ -313,27 +352,53 @@ export const useFocusStore = create<FocusState>((set, get) => ({
     stopTicking();
     set({ session: null, result: localRecord(session, outcome), sessionError: null });
 
+    // Before the write, for the same reason the clock stops before it: the
+    // session is over, and a second window still counting it down would be
+    // showing minutes nobody is focusing.
+    announceFocusSession(null);
+
+    let row: FocusSession;
     try {
-      const row = await endFocusSession(session.id, {
+      row = await endFocusSession(session.id, {
         completed: outcome.completed,
         duration_seconds: outcome.duration,
       });
-      set((state) => ({
-        // Unless another session has already been started on top of this one,
-        // in which case the card belongs to that session's future, not this
-        // session's past.
-        result: state.session ? state.result : row,
-        history: [row, ...state.history.filter((past) => past.id !== row.id)],
-      }));
-
-      // Announced only now, once the row is stored: a subscriber that
-      // re-reads the database — the task list, whose `focus_seconds` this
-      // session just changed — has to be able to trust that the minutes it
-      // will find are already there. See `src/lib/focus-events.ts`.
-      emitFocusSessionEnded(row);
     } catch (cause) {
-      set({ sessionError: String(cause) });
+      // A countdown can run out in two windows within a tick of each other,
+      // and the second `end_focus_session` is refused because the row is
+      // already closed. That is the session having been recorded, not a
+      // failure to record it — so the stored row is read back and used, and
+      // only a session that genuinely did not end is reported as an error.
+      const ended = await getFocusSession(session.id).catch(() => null);
+      if (!ended || ended.ended_at === null) {
+        set({ sessionError: String(cause) });
+        return;
+      }
+      row = ended;
     }
+
+    set((state) => ({
+      // Unless another session has already been started on top of this one,
+      // in which case the card belongs to that session's future, not this
+      // session's past.
+      result: state.session ? state.result : row,
+      history: [row, ...state.history.filter((past) => past.id !== row.id)],
+    }));
+
+    // Announced only now, once the row is stored: a subscriber that re-reads
+    // the database — the task list, whose `focus_seconds` this session just
+    // changed — has to be able to trust that the minutes it will find are
+    // already there. See `src/lib/focus-events.ts`.
+    emitFocusSessionEnded(row);
+
+    // The same re-read, for the app's *other* windows. Section 17's "actual
+    // focus time" is on the task row, and a session finished from the widget
+    // has just changed it for a list the main window is still holding.
+    if (row.task_id !== null) announceDataChanged("tasks");
+
+    // And section 43's +25, which `end_focus_session` has already written for
+    // a session that reached its target.
+    emitProgressChanged();
   },
 
   dismissResult() {
@@ -365,6 +430,28 @@ export const useFocusStore = create<FocusState>((set, get) => ({
     });
 
     startTicking(set, get);
+  },
+
+  adoptSession(session) {
+    // Two windows that both restored the same session from the database, and
+    // then both answered a request about it, are agreeing rather than
+    // disagreeing — re-setting the store would restart the interval and
+    // re-render every second of it for nothing.
+    if (isSameClock(get().session, session)) return;
+
+    stopTicking();
+
+    set({
+      session,
+      // A session arriving from elsewhere is news about the present, so
+      // whatever this window was showing about the past goes away with it —
+      // including an error about a write another window has since made.
+      result: null,
+      sessionError: null,
+      presetId: session?.presetId ?? get().presetId,
+    });
+
+    if (session?.status === "running") startTicking(set, get);
   },
 
   async loadHistory() {
@@ -408,6 +495,14 @@ function tick(set: Set, get: Get): void {
   // the interval before it waits on the database, so the tick that lands
   // during the write finds nothing to end twice.
   if (hasReachedTarget({ ...session, elapsedSeconds })) {
+    // Here rather than in `finishSession`, which is also what pressing Finish
+    // calls: a session the user ended themselves needs no announcement,
+    // because they were looking at the button when they ended it. A session
+    // that ran out did so on its own clock, and this is the one cue in the
+    // app that is doing real work rather than decorating — the user may well
+    // be in another window with the timer out of sight, which is exactly what
+    // section 20's timer is for.
+    playSound("focus-complete");
     void get().finishSession();
   }
 }
@@ -438,6 +533,29 @@ function stopTicking(): void {
 function elapsedSecondsOf(session: ActiveFocusSession, now: number = Date.now()): number {
   const until = session.pausedAtMs ?? now;
   return Math.max(0, Math.floor((until - session.startedAtMs - session.pausedMs) / 1000));
+}
+
+/**
+ * Whether two windows are describing the same clock in the same place.
+ *
+ * Everything that decides what the face reads, and nothing that does not:
+ * `elapsedSeconds` is left out because it is recomputed from the three fields
+ * above it on every tick, and comparing it would make two windows a fraction
+ * of a second apart look like a disagreement worth restarting the timer over.
+ */
+function isSameClock(
+  a: ActiveFocusSession | null,
+  b: ActiveFocusSession | null,
+): boolean {
+  if (a === null || b === null) return a === b;
+
+  return (
+    a.id === b.id &&
+    a.status === b.status &&
+    a.startedAtMs === b.startedAtMs &&
+    a.pausedMs === b.pausedMs &&
+    a.pausedAtMs === b.pausedAtMs
+  );
 }
 
 /** What a session ended as: the seconds it earned, and whether it finished. */

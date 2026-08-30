@@ -108,7 +108,13 @@ function RoutineActionRow({
         </Button>
       </div>
 
-      <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-[10rem_1fr]">
+      {/* Stacked below `md`, where the row is already giving a column to
+          the reorder buttons and another to the delete button: a 10rem type
+          picker beside a path field leaves the path about 300px, and a path
+          is the one value in this form that is routinely longer than the box
+          it is typed into. Section 84's responsive layouts, at the shell's
+          breakpoint. */}
+      <div className="grid min-w-0 flex-1 gap-3 md:grid-cols-[10rem_1fr]">
         <div className="flex flex-col gap-1.5">
           <Label className="text-xs text-muted-foreground">Type</Label>
           <Select
@@ -149,7 +155,7 @@ function RoutineActionRow({
         </div>
 
         {TAKES_ARGUMENTS.includes(action.type) && (
-          <div className="flex min-w-0 flex-col gap-1.5 sm:col-start-2">
+          <div className="flex min-w-0 flex-col gap-1.5 md:col-start-2">
             <Label htmlFor={argumentsId} className="text-xs text-muted-foreground">
               Arguments (optional)
             </Label>
@@ -163,7 +169,7 @@ function RoutineActionRow({
         )}
 
         {action.type === "command" && (
-          <p className="flex items-start gap-1.5 text-xs text-muted-foreground sm:col-span-2">
+          <p className="flex items-start gap-1.5 text-xs text-muted-foreground md:col-span-2">
             <ShieldAlert className="mt-0.5 size-3.5 shrink-0 text-priority-high" />
             Command actions only run once you enable them in Settings, and the exact command is
             shown before it runs (development-plan.md section 66).

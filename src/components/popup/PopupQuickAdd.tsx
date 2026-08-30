@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 
+import InlineError from "@/components/common/states/InlineError";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { todayKey } from "@/lib/task-utils";
@@ -116,7 +117,13 @@ function PopupQuickAdd({ onAdded }: PopupQuickAddProps) {
         </Button>
       </div>
 
-      {error && <p className="text-[11px] leading-tight text-priority-urgent">{error}</p>}
+      {error && (
+        <InlineError
+          className="px-2 py-1.5 text-[11px] leading-tight"
+          message={error}
+          onDismiss={() => setError(null)}
+        />
+      )}
     </form>
   );
 }

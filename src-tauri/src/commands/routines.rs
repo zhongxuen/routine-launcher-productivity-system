@@ -185,7 +185,7 @@ fn finish_run(app: &AppHandle, result: RoutineRunResult) -> RoutineRunResult {
         };
 
         if let Err(err) = app.emit(TIMER_REQUESTED_EVENT, request) {
-            eprintln!("[routine] could not emit {TIMER_REQUESTED_EVENT}: {err}");
+            crate::log_error!("[routine] could not emit {TIMER_REQUESTED_EVENT}: {err}");
         }
     }
 

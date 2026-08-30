@@ -23,6 +23,7 @@ import { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, Play, Plus } from "lucide-react";
 
+import ErrorState from "@/components/common/states/ErrorState";
 import RoutineIcon from "@/components/routines/RoutineIcon";
 import RoutineLaunchDialog from "@/components/routines/RoutineLaunchDialog";
 import { Button } from "@/components/ui/button";
@@ -115,7 +116,12 @@ function QuickStart() {
         )}
       </div>
 
-      <QuickStartBody isLoading={isLoading} error={error} routines={featured} />
+      <QuickStartBody
+        isLoading={isLoading}
+        error={error}
+        onRetry={() => void loadRoutines()}
+        routines={featured}
+      />
 
       {/*
         The launch panel (section 32) is store-driven and rendered by whichever
@@ -132,16 +138,25 @@ function QuickStart() {
 interface QuickStartBodyProps {
   isLoading: boolean;
   error: string | null;
+  onRetry: () => void;
   routines: RoutineWithActions[];
 }
 
-/** The row itself, or whatever stands in for it. */
-function QuickStartBody({ isLoading, error, routines }: QuickStartBodyProps) {
+/**
+ * The row itself, or whatever stands in for it.
+ *
+ * The failure and the empty case are both a card rather than the bare block
+ * the rest of the app uses, because this row sits between two other cards on
+ * the dashboard and an unbounded block between them reads as a hole in the
+ * page. Same words and the same retry, in the surround this spot needs.
+ */
+function QuickStartBody({ isLoading, error, onRetry, routines }: QuickStartBodyProps) {
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div role="status" aria-busy className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <span className="sr-only">Loading your routines</span>
         {Array.from({ length: MAX_QUICK_START }, (_, index) => (
-          <Skeleton key={index} className="h-32 rounded-xl" />
+          <Skeleton key={index} className="h-32 rounded-xl" aria-hidden />
         ))}
       </div>
     );
@@ -149,11 +164,18 @@ function QuickStartBody({ isLoading, error, routines }: QuickStartBodyProps) {
 
   if (error) {
     return (
-      <Card className="items-center gap-2 py-6 text-center">
-        <p className="px-6 text-sm text-muted-foreground">Could not load your routines.</p>
-        <Button variant="outline" size="sm" asChild>
-          <Link to="/routines/my-routines">Open Routines</Link>
-        </Button>
+      <Card className="py-2">
+        <ErrorState
+          title="Could not load your routines."
+          message={error}
+          onRetry={onRetry}
+          className="py-6"
+          action={
+            <Button variant="ghost" size="sm" asChild>
+              <Link to="/routines/my-routines">Open Routines</Link>
+            </Button>
+          }
+        />
       </Card>
     );
   }

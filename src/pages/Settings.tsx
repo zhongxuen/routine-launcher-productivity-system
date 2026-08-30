@@ -7,7 +7,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import AboutCard from "@/components/settings/AboutCard";
+import CloseToTrayCard from "@/components/settings/CloseToTrayCard";
 import CommandActionsCard from "@/components/settings/CommandActionsCard";
+import DataCard from "@/components/settings/DataCard";
+import DesktopWidgetCard from "@/components/settings/DesktopWidgetCard";
+import DiagnosticsCard from "@/components/settings/DiagnosticsCard";
+import MotionSoundCard from "@/components/settings/MotionSoundCard";
+import QuickLauncherCard from "@/components/settings/QuickLauncherCard";
+import StartupCard from "@/components/settings/StartupCard";
+import UpdatesCard from "@/components/settings/UpdatesCard";
+import WalkthroughCard from "@/components/settings/WalkthroughCard";
 import { useThemeStore, type ThemePreference } from "@/stores/themeStore";
 
 function Settings() {
@@ -45,11 +55,57 @@ function Settings() {
         </CardContent>
       </Card>
 
+      {/* Directly under Appearance: theme, motion and sound are the three
+          settings about how the app presents itself, and they belong together
+          above the ones about what it is allowed to do. */}
+      <MotionSoundCard />
+
+      <CloseToTrayCard />
+
+      {/* Directly under the tray, because it is the same subject seen from
+          the other end: close-to-tray decides where the app goes when you
+          shut its window, start-up decides whether it is there before you
+          open one. Both are answers to "is this thing running when I am not
+          looking at it". */}
+      <StartupCard />
+
+      <QuickLauncherCard />
+
+      <DesktopWidgetCard />
+
       <CommandActionsCard />
 
+      <WalkthroughCard />
+
+      {/* Section 69's Data group. Last of the working settings, and after
+          the walkthrough on purpose: everything above changes how the app
+          behaves, and this one changes what it holds. Export, Import and
+          Reset are also the only controls on this page that can lose
+          something, so they sit at the end rather than in the middle of the
+          switches. */}
+      <DataCard />
+
+      {/* Section 85's update strategy. Below Data on purpose: an update
+          replaces the program and leaves the database alone, and the card
+          directly above it is the one that can put the database somewhere
+          safe first. Above Diagnostics and About for the same reason those
+          two are next to each other — this is the third thing you read out
+          to whoever is helping you, and the one that most often ends the
+          conversation. */}
+      <UpdatesCard />
+
+      {/* Section 85's crash log. Below Data because it is the same subject at
+          one remove — that group is what the app holds on purpose, this is
+          what it wrote down when something failed — and directly above About
+          because the two are what you read out to whoever is helping you: the
+          version, and the file. */}
+      <DiagnosticsCard />
+
+      <AboutCard />
+
       <p className="text-sm text-muted-foreground">
-        The remaining settings groups (daily start time, default focus length, notifications,
-        start-up behaviour) arrive with their features.
+        The remaining settings groups (daily start time, default focus length, notifications)
+        arrive with their features.
       </p>
     </div>
   );

@@ -96,25 +96,15 @@ export interface RoutineRun {
 /* Statistics (development-plan.md section 33)                                */
 /* -------------------------------------------------------------------------- */
 
-/**
- * The five figures section 33 tracks per routine.
+/*
+ * Section 33's five figures used to be declared here, with three of them
+ * nullable because nothing measured them yet.
  *
- * camelCase because this is not a wire shape: `launches` and `lastUsed` are
- * read straight off the routine row.
- *
- * The other three are `null` rather than `0`, because there is a difference
- * between "this routine has had no focus time" and "focus time is not
- * recorded yet", and only one of those is true today — see the TODO in
- * `RoutineStatisticsDialog.tsx`. A `null` renders as a dash, not a zero, so
- * the panel never shows an invented figure as if it were measured.
+ * They now live in `@/types/analytics` as `RoutineStatistics`, mirroring what
+ * `services/analytics.rs` computes. The move is the point: while the panel
+ * derived what it could from the routine row, the shape belonged to the UI;
+ * now that focus time, average session and tasks completed are all read
+ * across `focus_sessions` and `tasks`, the shape belongs to the payload that
+ * carries them. `focusSeconds` and `tasksCompleted` are consequently plain
+ * numbers rather than `number | null` — a zero there is a measured zero.
  */
-export interface RoutineStatistics {
-  launches: number;
-  /** Total focus time recorded against this routine, in seconds. */
-  focusSeconds: number | null;
-  /** Mean length of one focus session in seconds. */
-  averageSessionSeconds: number | null;
-  tasksCompleted: number | null;
-  /** UTC timestamp of the last launch, or null if never launched. */
-  lastUsed: string | null;
-}

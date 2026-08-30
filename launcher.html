@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quick Launcher</title>
+    <!-- Painted before the stylesheet loads so the overlay never flashes white. -->
+    <style>
+      html {
+        background-color: #0a0a0b;
+      }
+
+      /* The window is sized to its contents by Rust (see
+         `services/quick_launcher.rs`), so the document must be free to be
+         shorter than the viewport — the app-wide `height: 100%` would make
+         every measurement come back as whatever the window already is. */
+      html,
+      body,
+      #root {
+        height: auto;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/launcher.tsx"></script>
+  </body>
+</html>

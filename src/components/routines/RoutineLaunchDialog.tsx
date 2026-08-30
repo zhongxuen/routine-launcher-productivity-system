@@ -213,17 +213,30 @@ function FocusLine({ run }: { run: RoutineRun }) {
   );
 }
 
-/** One line of the checklist: state glyph, name, and why it failed. */
+/**
+ * One line of the checklist: state glyph, name, and why it failed.
+ *
+ * The glyph is keyed on the status, which is what makes an action *resolving*
+ * legible (section 84). React replaces the element rather than re-rendering
+ * it whenever the status changes, so the incoming ✓ or ✗ plays its scale-in
+ * from the first frame — the line reads as being ticked off rather than as
+ * having quietly always been ticked. Pending and skipped are excluded: a dash
+ * appearing is not an outcome, and animating it would draw the eye to the
+ * lines where nothing has happened yet.
+ */
 function ActionLine({ entry }: { entry: RoutineRunAction }) {
   const Icon = STATUS_ICON[entry.status];
+  const isResolved = entry.status === "success" || entry.status === "failure";
 
   return (
     <li className="flex items-center gap-2 text-sm">
       <Icon
+        key={entry.status}
         className={cn(
           "size-4 shrink-0",
           STATUS_COLOR[entry.status],
           entry.status === "running" && "animate-spin",
+          isResolved && "animate-in zoom-in-50 fade-in-0 duration-200",
         )}
       />
       <span

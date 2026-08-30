@@ -1,5 +1,9 @@
-import { formatDayHeading, groupByPriority, PRIORITY_HEADINGS } from "@/lib/task-utils";
+import { Plus } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 import { useTaskView } from "@/hooks/useTaskView";
+import { formatDayHeading, groupByPriority, PRIORITY_HEADINGS } from "@/lib/task-utils";
+import { useTaskStore } from "@/stores/taskStore";
 
 import TaskSection from "./TaskSection";
 import TaskViewBody from "./TaskViewBody";
@@ -16,6 +20,7 @@ import TaskViewHeader from "./TaskViewHeader";
  */
 function TasksToday() {
   const { tasks, isLoading, error, reload } = useTaskView("today");
+  const openQuickAdd = useTaskStore((state) => state.openQuickAdd);
   const groups = groupByPriority(tasks);
 
   return (
@@ -29,6 +34,12 @@ function TasksToday() {
         isEmpty={groups.length === 0}
         emptyTitle="Nothing scheduled for today."
         emptyHint="Press Ctrl+N to add a task."
+        emptyAction={
+          <Button size="sm" variant="outline" onClick={openQuickAdd}>
+            <Plus className="size-4" />
+            Add a task
+          </Button>
+        }
       >
         <div className="flex flex-col gap-5">
           {groups.map((group) => (

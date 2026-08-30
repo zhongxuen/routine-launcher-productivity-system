@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { ChevronDown, Loader2, Rocket, X } from "lucide-react";
 
 import { quickStartRoutines } from "@/components/dashboard/QuickStart";
+import ErrorState from "@/components/common/states/ErrorState";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -75,14 +76,27 @@ function PopupRoutineLaunch() {
   const isRunning = runningName !== null;
 
   if (isLoading && routines.length === 0) {
-    return <Skeleton className="h-8 w-full rounded-md" />;
+    return (
+      <div role="status" aria-busy>
+        <span className="sr-only">Loading your routines</span>
+        <Skeleton className="h-8 w-full rounded-md" aria-hidden />
+      </div>
+    );
   }
 
   if (error) {
+    // The retry belongs here rather than in the app: this window is summoned
+    // by a tray click and dismissed by a keystroke, so "go and reopen the
+    // main window" is a long way round for a read that will probably work on
+    // the second press.
     return (
-      <p className="text-[11px] leading-tight text-muted-foreground">
-        Could not read your routines.
-      </p>
+      <ErrorState
+        size="compact"
+        className="px-0"
+        title="Could not read your routines."
+        onRetry={() => void loadRoutines()}
+        retryLabel="Retry"
+      />
     );
   }
 

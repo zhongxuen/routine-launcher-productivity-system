@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { isToday } from "date-fns";
 import { Play, Timer } from "lucide-react";
 
+import StaleNotice from "@/components/common/states/StaleNotice";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -111,12 +112,11 @@ function FocusWidget({ className }: { className?: string }) {
           is what the block is for, so a failed read is stated quietly under
           it rather than replacing everything above. */}
       {error && (
-        <div className="flex flex-wrap items-center gap-1 px-5 text-xs text-muted-foreground">
-          <span>Today&apos;s total may be incomplete.</span>
-          <Button variant="link" size="xs" className="h-auto p-0" onClick={() => void loadHistory()}>
-            Try again
-          </Button>
-        </div>
+        <StaleNotice
+          className="px-5"
+          message="Today's total may be incomplete."
+          onRetry={() => void loadHistory()}
+        />
       )}
     </Card>
   );

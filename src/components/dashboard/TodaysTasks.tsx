@@ -5,6 +5,7 @@ import QuickAddTask from "@/components/tasks/QuickAddTask";
 import TaskViewBody from "@/components/tasks/TaskViewBody";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { useAnimatedList } from "@/hooks/useAnimatedList";
 import { useTaskView } from "@/hooks/useTaskView";
 import { completionCounts, sortTasks } from "@/lib/task-utils";
 import { useTaskStore } from "@/stores/taskStore";
@@ -66,6 +67,7 @@ function TodaysTasks() {
 
   const open = openTasks(tasks);
   const shown = open.slice(0, MAX_ROWS);
+  const rows = useAnimatedList(shown, (task) => task.id);
   const hidden = open.length - shown.length;
 
   const { completed, total } = completionCounts(tasks);
@@ -110,7 +112,10 @@ function TodaysTasks() {
         isLoading={isLoading}
         error={error}
         onRetry={reload}
-        isEmpty={shown.length === 0}
+        // `rows`, not `shown`: ticking off the last open task would
+        // otherwise swap straight to "All done for today." and cut that row's
+        // fade off at its first frame.
+        isEmpty={rows.length === 0}
         emptyTitle={isDayDone ? "All done for today." : "Nothing scheduled for today."}
         emptyHint={
           isDayDone
@@ -119,8 +124,8 @@ function TodaysTasks() {
         }
       >
         <ul className="flex flex-col">
-          {shown.map((task) => (
-            <DashboardTaskRow key={task.id} task={task} />
+          {rows.map(({ key, item, phase }) => (
+            <DashboardTaskRow key={key} task={item} phase={phase} />
           ))}
         </ul>
       </TaskViewBody>

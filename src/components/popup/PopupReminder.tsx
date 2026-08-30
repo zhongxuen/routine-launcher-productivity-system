@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Bell, BellOff, Clock, Loader2, Play } from "lucide-react";
 
+import InlineError from "@/components/common/states/InlineError";
 import { Button } from "@/components/ui/button";
 import { useReminderActions } from "@/hooks/useReminderActions";
 import { handOffReminderToApp, onReminderHandled } from "@/lib/reminder-events";
@@ -155,7 +156,7 @@ function PopupReminder() {
         )}
       </div>
 
-      {error && <p className="text-[11px] leading-tight text-priority-urgent">{error}</p>}
+      {error && <InlineError className="px-2 py-1 text-[11px] leading-tight" message={error} />}
 
       <div className="flex items-center gap-1">
         {reminder.actions.map((action, index) => {

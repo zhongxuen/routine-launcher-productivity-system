@@ -18,16 +18,20 @@ export default defineConfig(async () => ({
 
   build: {
     rollupOptions: {
-      // Two HTML entries, one per Tauri window. The compact popup
-      // (development-plan.md section 25) is a real second window, so it gets
-      // its own document and its own bundle rather than a route inside the
-      // main one — none of the app shell's router, sidebar or focus-session
-      // lifecycle belongs in a 340px checklist. The dev server serves both
-      // from the project root without any of this; it is only the production
-      // build that has to be told there is more than `index.html`.
+      // Four HTML entries, one per Tauri window. The compact popup
+      // (development-plan.md section 25), the quick launcher (section 28) and
+      // the desktop widget (sections 26, 83) are real second, third and fourth
+      // windows, so each gets its own document and its own bundle rather than
+      // a route inside the main one — none of the app shell's router, sidebar
+      // or focus-session lifecycle belongs in a 340px checklist, a search box
+      // or a 300px widget. The dev server serves all four from the project
+      // root without any of this; it is only the production build that has to
+      // be told there is more than `index.html`.
       input: {
         main: path.resolve(__dirname, "index.html"),
         popup: path.resolve(__dirname, "popup.html"),
+        launcher: path.resolve(__dirname, "launcher.html"),
+        widget: path.resolve(__dirname, "widget.html"),
       },
     },
   },

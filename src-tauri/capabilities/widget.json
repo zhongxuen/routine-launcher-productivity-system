@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "widget",
+  "description": "Capability for the optional desktop widget (development-plan.md sections 26, 83). Core only: the widget reads tasks, routines and the focus session through this app's own commands, which are not permission-gated, and needs `core:event` for `widget://shown`, `widget://settings-changed` and the cross-window data-changed broadcast. Section 83's five controls are conspicuously not window permissions: move, resize, pin and hide are Rust commands that clamp and persist what they are asked for, so a webview can never place an always-on-top window off screen, size it to the desktop, or unpin itself into something the user cannot find.",
+  "windows": [
+    "widget"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

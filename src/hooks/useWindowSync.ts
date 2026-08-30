@@ -15,6 +15,7 @@
 import { useEffect } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
+import { emitProgressChanged } from "@/lib/progress-events";
 import { onDataChanged } from "@/lib/window-sync";
 import { useRoutineStore } from "@/stores/routineStore";
 import { useTaskStore } from "@/stores/taskStore";
@@ -33,6 +34,13 @@ export function useWindowSync(): void {
       } else {
         void useRoutineStore.getState().loadRoutines();
       }
+
+      // Both scopes can have earned XP — a task ticked off in the popup, a
+      // routine launched from the quick launcher — and this window may be the
+      // one showing the level and the streak. Announced rather than reloaded
+      // here so there is one subscriber doing it either way; see
+      // `useProgressSync`.
+      emitProgressChanged();
     })
       .then((fn) => {
         if (cancelled) fn();

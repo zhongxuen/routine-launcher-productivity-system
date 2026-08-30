@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { addDays, format } from "date-fns";
 import { toast } from "sonner";
 
+import InlineError from "@/components/common/states/InlineError";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -190,7 +191,7 @@ function QuickAddTask() {
 
           <RecurrencePicker idPrefix="quick-add" value={recurrence} onChange={setRecurrence} />
 
-          {error && <p className="text-xs text-priority-urgent">{error}</p>}
+          {error && <InlineError message={error} onDismiss={() => setError(null)} />}
 
           <div className="flex justify-end">
             <Button type="submit" size="sm" disabled={!trimmed || isSaving}>
