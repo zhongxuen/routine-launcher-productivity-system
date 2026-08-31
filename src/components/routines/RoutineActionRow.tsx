@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { opensViaShell } from "@/lib/installed-app-utils";
 import {
   ROUTINE_ACTION_ICONS,
   ROUTINE_ACTION_TARGET_HINTS,
@@ -24,6 +25,8 @@ import {
   type NewRoutineAction,
   type RoutineActionType,
 } from "@/types/routine";
+
+import ApplicationPicker from "./ApplicationPicker";
 
 /**
  * One action while it is being edited.
@@ -39,6 +42,21 @@ export interface ActionDraft extends NewRoutineAction {
 
 /** Types that take extra arguments; the rest are launched with the target alone. */
 const TAKES_ARGUMENTS: RoutineActionType[] = ["application", "command"];
+
+/**
+ * Whether this row can carry arguments — its type allows them *and* its
+ * target is something that can receive them.
+ *
+ * A Store app and a shortcut are both started by handing them to Windows,
+ * which takes no argument list, so the launch refuses one (see
+ * `routine_exec::launch_application`). Hiding the field is how that refusal
+ * stops being a surprise at launch time; a target typed before the field went
+ * away keeps its value, so switching back to a program restores it.
+ */
+function takesArguments(action: ActionDraft): boolean {
+  if (!TAKES_ARGUMENTS.includes(action.type)) return false;
+  return action.type !== "application" || !opensViaShell(action.target);
+}
 
 interface RoutineActionRowProps {
   action: ActionDraft;
@@ -143,18 +161,28 @@ function RoutineActionRow({
           <Label htmlFor={targetId} className="text-xs text-muted-foreground">
             {ROUTINE_ACTION_TARGET_LABELS[action.type]}
           </Label>
-          <Input
-            id={targetId}
-            value={action.target}
-            onChange={(event) => onChange({ target: event.target.value })}
-            placeholder={ROUTINE_ACTION_TARGET_HINTS[action.type]}
-            inputMode={action.type === "timer" ? "numeric" : "text"}
-            aria-invalid={error !== null}
-          />
+          {action.type === "application" ? (
+            <ApplicationPicker
+              id={targetId}
+              value={action.target}
+              invalid={error !== null}
+              label={`action ${index + 1}`}
+              onChange={(target) => onChange({ target })}
+            />
+          ) : (
+            <Input
+              id={targetId}
+              value={action.target}
+              onChange={(event) => onChange({ target: event.target.value })}
+              placeholder={ROUTINE_ACTION_TARGET_HINTS[action.type]}
+              inputMode={action.type === "timer" ? "numeric" : "text"}
+              aria-invalid={error !== null}
+            />
+          )}
           {error && <p className="text-xs text-priority-urgent">{error}</p>}
         </div>
 
-        {TAKES_ARGUMENTS.includes(action.type) && (
+        {takesArguments(action) && (
           <div className="flex min-w-0 flex-col gap-1.5 md:col-start-2">
             <Label htmlFor={argumentsId} className="text-xs text-muted-foreground">
               Arguments (optional)

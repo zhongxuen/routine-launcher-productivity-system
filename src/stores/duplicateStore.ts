@@ -93,6 +93,17 @@ interface DuplicateState {
 
   loadDefaults: () => Promise<void>;
   chooseFolders: () => Promise<void>;
+  /**
+   * Points the next scan at one folder, without opening the picker.
+   *
+   * The Storage Overview's "Find duplicates here" link, and the only
+   * caller: a user who has just seen that `Downloads` holds 24 GB should
+   * arrive here with `Downloads` already in the box rather than have to
+   * find it again. It fills the same field {@link chooseFolders} fills and
+   * stops there — no scan is started, because reading someone's folder is
+   * still theirs to ask for.
+   */
+  focusFolder: (folder: string) => void;
   resetFolders: () => Promise<void>;
   setIncludeSubfolders: (include: boolean) => void;
   runScan: () => Promise<void>;
@@ -187,6 +198,20 @@ export const useDuplicateStore = create<DuplicateState>((set, get) => ({
     } catch {
       set({ isReady: true });
     }
+  },
+
+  focusFolder(folder) {
+    // `isReady` too: this store loads Downloads and Desktop on mount when it
+    // has never been opened, and that load would otherwise overwrite the
+    // folder that was just handed to it.
+    set({
+      folders: [folder],
+      isReady: true,
+      scan: null,
+      selected: new Set(),
+      report: null,
+      error: null,
+    });
   },
 
   /** Opens the native folder picker and replaces the scan list with the result. */

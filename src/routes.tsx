@@ -27,6 +27,7 @@ import CleanupDesktop from "./components/cleanup/CleanupDesktop";
 import CleanupDuplicates from "./components/cleanup/CleanupDuplicates";
 import CleanupLargeFiles from "./components/cleanup/CleanupLargeFiles";
 import CleanupScreenshots from "./components/cleanup/CleanupScreenshots";
+import CleanupStorage from "./components/cleanup/CleanupStorage";
 
 import ProgressStatistics from "./components/progress/ProgressStatistics";
 import ProgressAchievements from "./components/progress/ProgressAchievements";
@@ -84,6 +85,7 @@ export const routes: RouteObject[] = [
           { path: "duplicates", element: <CleanupDuplicates /> },
           { path: "large-files", element: <CleanupLargeFiles /> },
           { path: "screenshots", element: <CleanupScreenshots /> },
+          { path: "storage", element: <CleanupStorage /> },
         ],
       },
       {

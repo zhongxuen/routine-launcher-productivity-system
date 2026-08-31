@@ -7,6 +7,7 @@ const SUB_NAV_ITEMS = [
   { to: "/cleanup/duplicates", label: "Duplicates" },
   { to: "/cleanup/large-files", label: "Large Files" },
   { to: "/cleanup/screenshots", label: "Screenshots" },
+  { to: "/cleanup/storage", label: "Storage" },
 ];
 
 function Cleanup() {

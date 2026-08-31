@@ -723,11 +723,9 @@ succeeding.
 Phase checklist mirroring `md-files/development-plan.md` §72–85 (build order in
 §93). This is the live status of the build — it is updated as work lands.
 
-All fourteen phases have been built. Two plan items are outstanding, and each
-is named on its own line below rather than folded into a phase that claims to
-be finished: the dashboard's statistics block (Phase 6) and the desktop scanner
-(Phase 10). Everything else is checked. `remaining.md` carries those two with a
-prompt for each, plus what the plan describes and no phase ever scheduled.
+All fourteen phases have been built, and every phase's `Build:` list is now
+checked. `md-files/remaining.md` carries what is left: the plan describes it,
+but no phase ever scheduled it.
 
 **Phase 1 — Foundation** ✅ complete
 
@@ -763,6 +761,7 @@ Deferred to the phases that need them: the `app_usage` and
 - [x] Action CRUD
 - [x] Routine builder
 - [x] Application launching
+- [x] Application picker (installed programs, by name)
 - [x] File launching
 - [x] Folder launching
 - [x] URL launching
@@ -796,6 +795,25 @@ away — Phase 4 fills `tasks.routine_id`, and Phase 5 writes a `routine_id` on
 every focus session `listRoutineFocusSessions` can already read back — but
 each is still shown as a dash until that query is written, because a dash is
 honest and a zero is not.
+
+An `application` action does not need a path. `services::installed_apps`
+reads what this computer has on it from the three places Windows keeps that
+— the Start Menu (`.lnk` files, parsed for the program behind them), the
+`App Paths` registry key behind Win+R, and the shell's applications folder,
+which is the only one that lists Store apps — and merges them into one
+catalogue of name-to-program. The builder's target field for an application
+is a picker over that list (`ApplicationPicker.tsx`): type to filter, click
+to choose, Browse for anything the scan missed, and a line underneath saying
+which program the row will actually open. Typing is still allowed and still
+stored verbatim, so nothing that worked before stops working.
+
+The same catalogue is the last thing `routine_exec` tries when it resolves a
+target, after the path and after `PATH`. That is what makes a routine saved
+as `Chrome` — including one saved before the picker existed — launch Google
+Chrome rather than failing: no path is on `PATH` for it, and `Chrome` is the
+name on the icon. Store apps are launched by ID through the shell and cannot
+take arguments, which the builder shows by hiding the arguments field for
+them rather than letting the launch be the thing that refuses.
 
 The command-action opt-in has a home in Settings — a switch that asks before
 it is turned on and takes effect immediately when it is turned off.
@@ -978,7 +996,7 @@ loop with the last step of §89's day, offering to tick the task off; that stays
 an offer, because a finished 50 minutes is not the same claim as a finished
 task.
 
-**Phase 6 — Dashboard** (one widget outstanding)
+**Phase 6 — Dashboard** ✅ complete
 
 - [x] The page itself (`src/pages/Dashboard.tsx`): §7's greeting and TODAY
       header over the four widgets below, in §7's stated priority order —
@@ -1024,9 +1042,20 @@ task.
       in a `refresh()` — which is what keeps it in step with a box ticked in the
       block above it. Rows are the same `DashboardTaskRow` Today draws, so
       ticking one off here is the same real mutation it is there
-- [ ] Basic statistics — §36's figures are all measured and drawn, but under
-      `/progress/statistics` (Phase 11), not on the dashboard. What is missing
-      is the dashboard-sized summary of them, not the numbers
+- [x] Basic statistics — §36's TODAY panel as one row
+      (`src/components/dashboard/BasicStatistics.tsx`): focus, tasks, routines
+      and completion in §36's own order, with everything else — the week, the
+      week's day-by-day focus, four weeks of streak history — behind a link to
+      `/progress/statistics`, because the dashboard is a starting point and not
+      a second analytics page. It reads the same `get_productivity_stats` that
+      page reads rather than a lighter dashboard-only command: §36 is measured
+      against one local `todayDate`, and a second command is how the two views
+      would start disagreeing about which day it is across midnight. It
+      re-reads when the task, focus or routine stores change, so a box ticked
+      in the block above moves `6 / 8` here. Every figure with nothing behind
+      it is a dash rather than a zero — a zero is a claim and a dash is not
+      (§88) — which is stricter than the statistics page, where a caption, a
+      week panel and seven bars say what a zero is relative to
 
 **Phase 7 — Notifications + Popup** ✅ complete
 
@@ -1208,7 +1237,11 @@ task.
       every load, in every window, so the guard has to be somewhere both
       windows can see
 
-**Phase 10 — Desktop Utilities** (desktop scanner outstanding)
+**Phase 10 — Desktop Utilities** ✅ complete
+
+§81's `Build:` list names five, and all five are below. The sixth entry is
+§38's remaining utility, built after the phase closed and marked there as an
+addition rather than as part of what the phase was measured against.
 
 - [x] Downloads scanner — §§38-39 under `/cleanup/downloads`
       (`src-tauri/src/services/downloads.rs`, `src/components/cleanup/`): a
@@ -1226,10 +1259,30 @@ task.
       outside Downloads — §66 applied to filesystem calls. Move is offered
       beside Delete because it is the recoverable one, and a move never
       overwrites what is already in the destination
-- [ ] Desktop scanner — §81’s fifth utility, and the one not built.
-      `/cleanup/desktop` is routed and reachable, but the component behind it
-      is still `PlaceholderView`, so the section says it is empty rather than
-      showing a scan that never ran
+- [x] Desktop scanner — §§38, 81 under `/cleanup/desktop`
+      (`src-tauri/src/services/desktop.rs`, `src/components/cleanup/`): the
+      Downloads scanner's sibling — same shape, same §67 order kept the same
+      way, by the API surface rather than by convention. `scan_desktop` only
+      reads; the two commands that change something take an explicit list of
+      paths and refuse an empty one; there is no "clean up the desktop" entry
+      point for a quest, a schedule or a tray item to call. The summary states
+      what is there and offers no action; the review opens with nothing ticked,
+      every time. What differs is what a desktop actually is. Shortcuts are
+      reported at their own size, never their target's, and nothing follows one
+      to act on what it points at. Folders are listed with a count of what is
+      directly inside them, never descended into to bucket their contents, and
+      never offered for deletion as if they were files. Age rather than
+      extension is the axis worth sorting a desktop by, so everything is
+      bucketed Today / This week / This month / Older against the same clock
+      the screenshot organizer uses. Both desktops are read — the per-user one
+      and the Public / All Users one Windows composites into the same screen —
+      each labelled, and the public one is refused for every action, because
+      writing there needs elevation this app does not ask for. Rust re-validates
+      every path before touching it: inside a desktop, not a symlink, not a
+      reparse point, not a name Windows would refuse, still the kind of thing
+      the command was asked for — §66 applied to filesystem calls. Move is
+      offered beside Delete because it is the recoverable one, and a move never
+      overwrites what is already in the destination
 - [x] Duplicate finder — §§38, 40 under `/cleanup/duplicates`
       (`src-tauri/src/services/duplicates.rs`, `src/components/cleanup/`): a
       scan of folders the user chooses — Downloads and Desktop to start with,
@@ -1305,6 +1358,41 @@ task.
       read once from SQLite and the rest is arithmetic, which is what lets the
       matching, the buckets and the month folders be unit-tested against a
       fixed offset
+- [x] Storage overview — §§38, 66, 67 under `/cleanup/storage`
+      (`src-tauri/src/services/storage.rs`,
+      `src/components/cleanup/CleanupStorage.tsx`). **An addition to §81's
+      five, not one of them:** §38 lists six utilities and Phase 10's `Build:`
+      list schedules five, so this is the sixth, built after the phase was
+      complete and leaving that list as it stands. It reports and does nothing
+      else: total and free space per fixed drive, then the top-level folders of
+      the user's profile with their sizes, largest first. There is no move, no
+      delete, no confirmation dialog and no selection anywhere in the feature —
+      not in the component, not in the store, not in the service, not in the
+      three commands — so §67's scan → select → confirm → act has nothing here
+      to reach past, and §66's "restrict dangerous operations" is kept by there
+      being no dangerous operation to restrict. What makes a read-only page
+      belong under Cleanup is where it points: every measured folder offers
+      "Find large files here" and "Find duplicates here", each of which fills
+      that folder into the target tool's own scan field and navigates there, so
+      the acting happens under that tool's confirmations rather than this one's.
+      Sizing a profile takes tens of seconds, nearly all of it `AppData`, so it
+      is never done in one call: `size_profile_folder` measures exactly one
+      top-level folder and the view calls it once per folder, drawing each
+      figure as it lands and re-ordering the list as a row learns its own size.
+      Stop is real rather than cosmetic — the overview hands out a token that
+      the walk re-checks as it goes, so cancelling stops the walk already
+      running and not merely the ones not yet started. A folder Windows will
+      not open is counted in that row's caption and skipped, because a locked
+      `AppData` subfolder is normal on every machine and not an error worth a
+      red panel; a walk that hits its own entry or time limit reports "at least
+      41.0 GB" with the reason beside it rather than a total it cannot stand
+      behind. Junctions and symlinks are never followed, so the legacy
+      `My Documents`-style reparse points in a profile cannot count the same
+      bytes twice. Drive space comes from four `kernel32` calls declared in the
+      service — the same approach `services::logging` takes to `MessageBoxW`,
+      and free space is the figure Explorer prints so the two agree — and the
+      whole feature takes no database connection and stores nothing, since a
+      remembered folder size is a claim about a disk that changes every minute
 
 **Phase 11 — Productivity Analytics** ✅ complete
 
@@ -1531,7 +1619,7 @@ labelled usage time. Left for a Tier 5 pass.
       again) extended down to everything smaller than a routine run: a failed
       save, a failed tick, a failed reminder action and a failed scan each
       report next to what was being changed rather than replacing it, and are
-      dismissible where the user may simply want them gone. Cleanup's four
+      dismissible where the user may simply want them gone. Cleanup's five
       tools distinguish "we could not look" from "there is nothing there" —
       never the same answer — and a rescan that fails after one that worked
       keeps the older results on screen under a line saying exactly that,

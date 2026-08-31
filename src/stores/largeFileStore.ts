@@ -94,6 +94,17 @@ interface LargeFileState {
   setThresholdMb: (thresholdMb: number) => void;
   /** Opens the folder picker and remembers what was chosen. */
   chooseRoot: () => Promise<void>;
+  /**
+   * Points the next scan at `folder`, without opening the picker.
+   *
+   * The Storage Overview's "Find large files here" link, and the only
+   * caller: a user who has just seen that `Downloads` holds 24 GB should
+   * arrive here with `Downloads` already chosen rather than have to find
+   * it again. It sets exactly what {@link chooseRoot} sets and stops
+   * there — no scan is started, because walking someone's folder is still
+   * theirs to ask for.
+   */
+  focusFolder: (folder: string) => void;
   /** Walks the chosen folder. Read-only; changes nothing on disk. */
   runScan: () => Promise<void>;
   /** Forgets the results without touching a file. */
@@ -161,6 +172,13 @@ export const useLargeFileStore = create<LargeFileState>((set, get) => ({
     } catch (cause) {
       toast.error("Could not open the folder picker", { description: String(cause) });
     }
+  },
+
+  focusFolder(folder) {
+    // The old results go with it: they describe somewhere else, and leaving
+    // them on screen under a new folder name would be the view lying about
+    // where they came from.
+    set({ root: folder, scan: null, error: null });
   },
 
   async runScan() {

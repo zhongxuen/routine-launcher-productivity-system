@@ -32,6 +32,18 @@
 //! of files the user ticked. Section 67's rule — scan, show, select,
 //! confirm, act — is kept by that being the only shape they come in.
 //!
+//! `desktop` is Stage 10's other folder scanner (sections 38, 81) and
+//! `downloads`' closest sibling — same shape, same order, same refusal to act
+//! on anything it was not handed. It differs in what a desktop actually is:
+//! shortcuts, which are reported at their own size and never followed to what
+//! they point at; folders, which are counted and never descended into or acted
+//! on; age rather than extension as the axis worth sorting by, bucketed
+//! against `screenshots`' clock so "today" means one thing across the app; and
+//! two desktops rather than one, because Windows composites the per-user and
+//! the Public Desktop into the single surface the user sees. The public one is
+//! read and labelled and never written to — that needs elevation this app does
+//! not ask for — which is the one rule it has that no other service does.
+//!
 //! `duplicates` is section 40's finder, and the one Stage 10 tool whose scan
 //! *opens* files rather than only listing them — it decides two files are the
 //! same by hashing them, which is the only comparison that can prove it. Like
@@ -61,6 +73,21 @@
 //! a timezone. Moving is a separate function from scanning and re-checks
 //! every path it is given, so section 67's order is not merely the order the
 //! UI happens to call things in.
+//!
+//! `storage` is section 38's sixth utility and the one section 81 never
+//! scheduled, which is why it arrives after the five that were. It is the
+//! only tool under Cleanup with no destructive function in it at all: it
+//! reports what is on each fixed drive and what the profile's folders come
+//! to, and where its four neighbours would offer a Move or a Delete it offers
+//! a link into `large_files` or `duplicates` with the folder filled in. So
+//! section 67's scan/select/confirm/act is not implemented here — there is no
+//! act to reach — and section 66 is kept by there being no dangerous
+//! operation to restrict rather than by restricting one. What it does own is
+//! the problem of taking tens of seconds without blocking: it sizes exactly
+//! one folder per call so the view can draw each answer as it lands, and it
+//! hands out a token the walk re-checks as it goes, which is what makes Stop
+//! stop something already running. Like its neighbours it takes no
+//! `DbConnection` and stores nothing.
 //!
 //! `analytics` is Stage 11's — sections 33, 36 and 82. It is the one service
 //! that owns no table: every figure in it is read across the tables its
@@ -134,14 +161,25 @@
 //! reminder, or a finished focus session, actually says; delivering it is
 //! `commands/notification.rs`'s job, because talking to the OS needs the
 //! Tauri runtime and services stay free of it.
+//!
+//! `installed_apps` is what a routine's `application` target is measured
+//! against when it is not a path: it reads the three lists Windows keeps of
+//! what is installed and answers "which program is called *Chrome*". Two
+//! callers, at the two ends of the same feature — the builder's picker, so
+//! the user never has to know a path, and `routine_exec`, so a target that
+//! was typed rather than picked still opens the right thing. It owns no
+//! table and holds no `DbConnection`; its state is a cache of the disk,
+//! rebuilt on request.
 
 pub mod analytics;
 pub mod backup;
+pub mod desktop;
 pub mod downloads;
 pub mod duplicates;
 pub mod error;
 pub mod focus;
 pub mod health;
+pub mod installed_apps;
 pub mod large_files;
 pub mod logging;
 pub mod notifications;
@@ -156,6 +194,7 @@ pub mod serde_util;
 pub mod settings;
 pub mod shortcuts;
 pub mod startup;
+pub mod storage;
 pub mod task_categories;
 pub mod task_recurrence;
 pub mod tasks;

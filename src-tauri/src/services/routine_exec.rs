@@ -240,6 +240,12 @@ fn launch_application(target: &str, arguments: &[String]) -> Result<(), String> 
     let resolved = resolve_executable(target);
     let path = resolved.as_deref().unwrap_or_else(|| Path::new(target));
 
+    // A Store app, named by ID rather than by file — checked first because
+    // every path-shaped test below would answer the wrong question about it.
+    if let Some(target) = as_store_app(path) {
+        return launch_store_app(target, arguments);
+    }
+
     // Checked before anything is spawned, because the OS does not describe
     // this one usefully. `CreateProcess` on a directory fails with "Access is
     // denied" and on a trailing separator with "program path has no file
@@ -277,6 +283,45 @@ fn launch_application(target: &str, arguments: &[String]) -> Result<(), String> 
     let mut command = Command::new(path);
     command.args(arguments);
     spawn_detached(&mut command).map_err(|err| launch_failure_message(target, &err))
+}
+
+/// The `shell:AppsFolder\…` form of `target`, if that is what it is.
+///
+/// Taken back off the `Path` it was wrapped in rather than tested before
+/// resolution, because a Store app can arrive either way: typed as an ID by
+/// someone who knows the syntax, or — far more often — resolved from the name
+/// the user picked out of the application list.
+fn as_store_app(path: &Path) -> Option<&str> {
+    let target = path.to_str()?;
+    target
+        .starts_with(crate::services::installed_apps::APPS_FOLDER)
+        .then_some(target)
+}
+
+/// Starts a packaged app through the shell's applications folder.
+///
+/// `explorer.exe` is the launcher because a packaged app has no executable to
+/// run: the shell resolves the ID, activates the package and starts whatever
+/// is registered inside it. Nothing else in this process can do that without
+/// COM.
+fn launch_store_app(target: &str, arguments: &[String]) -> Result<(), String> {
+    if !arguments.is_empty() {
+        return Err(format!(
+            "{target} is an app from the Microsoft Store, which cannot be given arguments. \
+             Remove them, or point this action at a program's .exe instead."
+        ));
+    }
+
+    let mut command = Command::new("explorer.exe");
+    command.arg(target);
+
+    // `explorer.exe` hands the request to the shell and exits — often with a
+    // non-zero code even when the app is starting — so the spawn succeeding
+    // is as much as can be known here, which is the same thing "success"
+    // means for every other action on this page.
+    spawn_detached(&mut command).map_err(|err| {
+        format!("{target} could not be started: {err}. The app may have been uninstalled.")
+    })
 }
 
 /// Runs a `command` action, or explains why it did not.
@@ -425,9 +470,18 @@ mod launch_error {
 /// says which of the two is worth a retry.
 fn launch_failure_message(target: &str, err: &std::io::Error) -> String {
     if err.kind() == std::io::ErrorKind::NotFound {
-        return format!(
-            "{target} could not be found. Check the path or use the full path to the program."
-        );
+        // A bare name and a path fail the same way and are wrong in different
+        // ways: one is a name no installed program answers to, the other is a
+        // path to nothing. Sending a user who typed "Chrome" off to check
+        // their path would be advice about a path they never wrote.
+        return if target.contains(['\\', '/']) {
+            format!("{target} could not be found. Check the path — the file is not there any more.")
+        } else {
+            format!(
+                "No installed program is called {target}. Pick it from the Application list when \
+                 editing this routine, or use the full path to its .exe."
+            )
+        };
     }
 
     #[cfg(windows)]
@@ -463,6 +517,13 @@ fn launch_failure_message(target: &str, err: &std::io::Error) -> String {
 /// is searched for on `PATH`. On Windows both forms are also tried with each
 /// `PATHEXT` suffix, which is how `code` finds `code.cmd` — the OS process
 /// APIs only ever append `.exe` themselves.
+///
+/// A bare name that is on neither gets one last lookup, in
+/// [`services::installed_apps`](crate::services::installed_apps): `Chrome`,
+/// `Spotify` and `Opera` are the names on the icons the user clicks, and none
+/// of the three is on `PATH`. That lookup goes last on purpose — a name that
+/// Windows itself can resolve resolves to the same thing it always did, and
+/// only a target that was about to fail can be changed by it.
 fn resolve_executable(target: &str) -> Option<PathBuf> {
     let path = Path::new(target);
 
@@ -470,13 +531,15 @@ fn resolve_executable(target: &str) -> Option<PathBuf> {
         return with_extensions(path).into_iter().find(|c| c.is_file());
     }
 
-    std::env::var_os("PATH")
+    let on_path = std::env::var_os("PATH")
         .map(|paths| {
             std::env::split_paths(&paths)
                 .flat_map(|dir| with_extensions(&dir.join(target)))
                 .find(|candidate| candidate.is_file())
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    on_path.or_else(|| crate::services::installed_apps::resolve(target))
 }
 
 /// `base` itself, plus — on Windows, and only when `base` has no extension
@@ -832,13 +895,36 @@ mod tests {
             "invalid characters should be named: {error}"
         );
 
-        // A drive that is not mounted, and a bare name that is not on PATH:
-        // both are "not found", which is the one message that was already
-        // right and has to stay that way.
-        for target in ["Z:\\nope\\app.exe", "definitely-not-a-program-9c1f"] {
-            let error = launch_application(target, &[]).unwrap_err();
-            assert!(error.contains("could not be found"), "{target}: {error}");
-        }
+        // A drive that is not mounted: a path to something that is not there.
+        let error = launch_application("Z:\\nope\\app.exe", &[]).unwrap_err();
+        assert!(error.contains("could not be found"), "{error}");
+
+        // A bare name that is on neither PATH nor the installed-programs
+        // list. Same OS error, different mistake — there is no path here to
+        // send the user off to check, so the message points at the picker
+        // that would have got the name right.
+        let error = launch_application("definitely-not-a-program-9c1f", &[]).unwrap_err();
+        assert!(
+            error.contains("No installed program is called"),
+            "a name should be named as one: {error}"
+        );
+        assert!(error.contains("Application list"), "{error}");
+    }
+
+    /// A Store app is started by ID through the shell, which takes no
+    /// argument list. Saying so is the whole of this test: the alternative is
+    /// arguments that are silently dropped, and a routine that looks like it
+    /// opens a workspace and opens an empty window instead.
+    #[test]
+    fn a_store_app_refuses_arguments_rather_than_dropping_them() {
+        let target = format!(
+            "{}SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
+            crate::services::installed_apps::APPS_FOLDER
+        );
+
+        let error = launch_application(&target, &["--minimized".to_owned()]).unwrap_err();
+        assert!(error.contains("cannot be given arguments"), "{error}");
+        assert!(error.contains(&target), "and names the target: {error}");
     }
 
     /// `launch_failure_message` is what turns an `io::Error` into that

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import BasicStatistics from "@/components/dashboard/BasicStatistics";
 import DailyQuests from "@/components/dashboard/DailyQuests";
 import FocusWidget from "@/components/dashboard/FocusWidget";
 import ProgressWidget from "@/components/dashboard/ProgressWidget";
@@ -51,13 +52,14 @@ function useNow(): Date {
  *
  * The vertical order is section 7's stated priority, not the order the
  * mockup happens to draw: today's tasks, then what is coming, then quick
- * routine launching, then focus, then progress. Upcoming is section 77's
- * build item rather than anything section 7 illustrates, and it goes directly
- * under today because that is the one thing section 7 does say about it —
- * today comes first. Progress comes last and paired with section 44's
- * daily objectives — sections 7 and 50 both put gamification below the
- * productivity system, so the two gamified blocks are the foot of the page
- * and nothing above them refers to XP at all.
+ * routine launching, then focus, then statistics, then progress. Upcoming and
+ * statistics are section 77's build items rather than anything section 7
+ * illustrates. Upcoming goes directly under today because that is the one
+ * thing section 7 does say about it — today comes first; statistics go under
+ * focus because they are that work counted up. Progress comes last and paired
+ * with section 44's daily objectives — sections 7 and 50 both put
+ * gamification below the productivity system, so the two gamified blocks are
+ * the foot of the page and nothing above them refers to XP at all.
  */
 function Dashboard() {
   const now = useNow();
@@ -94,9 +96,17 @@ function Dashboard() {
 
       <Separator />
 
-      {/* 4. Focus, then 5. Progress. Both are self-contained cards, so they
-          are separated by their own borders rather than another rule. */}
+      {/* 4. Focus, then 5. Statistics, then 6. Progress. All three are
+          self-contained cards, so they are separated by their own borders
+          rather than another rule. */}
       <FocusWidget />
+
+      {/* 5. Section 77's "basic statistics" — section 36's TODAY figures in
+          one row, with the rest behind a link to /progress/statistics. Above
+          the progress row rather than below it: this is a readout of the
+          productivity system, so it belongs on the productive side of
+          section 50's line, and nothing gamified may come before it. */}
+      <BasicStatistics />
 
       {/* Progress and section 44's objectives, side by side on a wide window
           and stacked on a narrow one — one band of gamification at the foot

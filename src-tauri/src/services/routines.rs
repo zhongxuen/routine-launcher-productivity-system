@@ -22,6 +22,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row, ToS
 use serde::{Deserialize, Serialize};
 
 use super::error::{ServiceError, ServiceResult};
+use super::installed_apps;
 use super::serde_util::double_option;
 use super::settings;
 use super::validate::{normalize_text, optional_text};
@@ -1017,6 +1018,9 @@ pub fn validate_command(target: &str) -> ServiceResult<String> {
 /// "50-minute timer", or the command itself.
 fn derive_label(action_type: RoutineActionType, target: &str) -> String {
     match action_type {
+        RoutineActionType::Application if target.starts_with(installed_apps::APPS_FOLDER) => {
+            store_app_label(target)
+        }
         RoutineActionType::Application | RoutineActionType::File => {
             std::path::Path::new(target)
                 .file_stem()
@@ -1043,6 +1047,32 @@ fn derive_label(action_type: RoutineActionType, target: &str) -> String {
         },
         RoutineActionType::Command => target.to_owned(),
     }
+}
+
+/// A short name for a Store app, whose target is an ID rather than a path.
+///
+/// `shell:AppsFolder\Claude_pzs8sxrjxfjjc!Claude` is `PackageFamilyName` —
+/// itself a name and a publisher hash — then `!`, then the application inside
+/// the package. The last part is usually the readable one ("Claude",
+/// "Spotify"); when the package only holds one app it is often just "App",
+/// and then the package's own name is what is left to use.
+fn store_app_label(target: &str) -> String {
+    let id = target.trim_start_matches(installed_apps::APPS_FOLDER);
+    let (family, application) = id.split_once('!').unwrap_or((id, ""));
+
+    if !application.is_empty() && !application.eq_ignore_ascii_case("App") {
+        return application.to_owned();
+    }
+
+    // `Microsoft.WindowsStore_8wekyb3d8bbwe` -> `WindowsStore`.
+    family
+        .split_once('_')
+        .map_or(family, |(name, _hash)| name)
+        .rsplit('.')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(id)
+        .to_owned()
 }
 
 #[cfg(test)]
@@ -1097,6 +1127,25 @@ mod tests {
         assert_eq!(routine.actions[0].label, "Code");
         assert_eq!(routine.actions[2].label, "Projects");
         assert_eq!(routine.actions[3].label, "50-minute timer");
+    }
+
+    /// A Store app's target is an ID, and every part of it except one is
+    /// machinery: the checklist in section 32 has to say "Claude", not
+    /// "Claude_pzs8sxrjxfjjc!Claude".
+    #[test]
+    fn a_store_app_is_labelled_by_its_name_rather_than_its_id() {
+        let label = |id: &str| {
+            derive_label(
+                RoutineActionType::Application,
+                &format!("{}{id}", installed_apps::APPS_FOLDER),
+            )
+        };
+
+        assert_eq!(label("Claude_pzs8sxrjxfjjc!Claude"), "Claude");
+        assert_eq!(label("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"), "Spotify");
+        // A package holding one app names it "App", which says nothing — the
+        // package's own name is the only readable part left.
+        assert_eq!(label("Microsoft.WindowsStore_8wekyb3d8bbwe!App"), "WindowsStore");
     }
 
     #[test]

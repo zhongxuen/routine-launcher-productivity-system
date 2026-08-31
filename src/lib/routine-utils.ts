@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import { APPS_FOLDER_PREFIX } from "@/lib/installed-app-utils";
 import { parseTimestamp } from "@/lib/task-utils";
 import {
   MAX_TIMER_MINUTES,
@@ -48,7 +49,7 @@ export const DEFAULT_ROUTINE_ICON = Rocket;
 
 /** Placeholder text for the target field: what this type expects. */
 export const ROUTINE_ACTION_TARGET_HINTS: Record<RoutineActionType, string> = {
-  application: "Code.exe, or the app name",
+  application: "Chrome, Spotify, or a path to a program",
   url: "https://github.com",
   folder: "C:\\Projects",
   file: "C:\\Projects\\notes.md",
@@ -148,9 +149,30 @@ const KNOWN_APPLICATIONS: Record<string, string> = {
 
 /** `C:\Program Files\VS Code\Code.exe` becomes `VS Code`. */
 function applicationLabel(target: string): string {
+  if (target.startsWith(APPS_FOLDER_PREFIX)) return storeAppLabel(target);
+
   const file = lastPathSegment(target) || target;
   const stem = file.replace(/\.(exe|lnk|bat|cmd|app)$/i, "");
   return KNOWN_APPLICATIONS[stem.toLowerCase()] ?? capitalise(stem);
+}
+
+/**
+ * `shell:AppsFolder\Claude_pzs8sxrjxfjjc!Claude` becomes `Claude`.
+ *
+ * A Store app is named by ID: the package family — a name and a publisher
+ * hash — then `!`, then the application inside it. The last part is usually
+ * the readable one; when a package holds a single app it is often just "App",
+ * and then the package's own name is what is left to use. Mirrors
+ * `store_app_label` in `src-tauri/src/services/routines.rs`.
+ */
+function storeAppLabel(target: string): string {
+  const id = target.slice(APPS_FOLDER_PREFIX.length);
+  const [family, application = ""] = id.split("!");
+
+  if (application && application.toLowerCase() !== "app") return application;
+
+  const packageName = family.split("_")[0] ?? family;
+  return packageName.split(".").pop() || id;
 }
 
 const capitalise = (value: string) =>
