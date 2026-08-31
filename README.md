@@ -723,12 +723,11 @@ succeeding.
 Phase checklist mirroring `md-files/development-plan.md` §72–85 (build order in
 §93). This is the live status of the build — it is updated as work lands.
 
-All fourteen phases have been built. Three plan items are outstanding, and each
+All fourteen phases have been built. Two plan items are outstanding, and each
 is named on its own line below rather than folded into a phase that claims to
-be finished: the dashboard's Upcoming and statistics blocks (Phase 6), and the
-desktop scanner (Phase 10). Everything else is checked. `remaining.md` carries
-those three with a prompt for each, plus what the plan describes and no phase
-ever scheduled.
+be finished: the dashboard's statistics block (Phase 6) and the desktop scanner
+(Phase 10). Everything else is checked. `remaining.md` carries those two with a
+prompt for each, plus what the plan describes and no phase ever scheduled.
 
 **Phase 1 — Foundation** ✅ complete
 
@@ -979,7 +978,7 @@ loop with the last step of §89's day, offering to tick the task off; that stays
 an offer, because a finished 50 minutes is not the same claim as a finished
 task.
 
-**Phase 6 — Dashboard** (two widgets outstanding)
+**Phase 6 — Dashboard** (one widget outstanding)
 
 - [x] The page itself (`src/pages/Dashboard.tsx`): §7's greeting and TODAY
       header over the four widgets below, in §7's stated priority order —
@@ -1013,9 +1012,18 @@ task.
       data props, which is what let Phase 9 point `progressStore` at
       `xpService` without reopening the component — that swap has since
       happened, and §44's objectives now sit beside it
-- [ ] Upcoming tasks — §7's mockup puts the next few days under TODAY. There is
-      no such block on the dashboard yet; `/tasks/upcoming` is where the same
-      query is read today
+- [x] Upcoming tasks — the next few days under TODAY
+      (`src/components/dashboard/UpcomingTasks.tsx`): the backend's `upcoming`
+      view grouped by day, capped at five rows across all of them with the rest
+      behind a link to `/tasks/upcoming`, because the dashboard is a starting
+      point and not a second task page. It owns its read rather than going
+      through `useTaskView`: `taskStore` holds one view at a time and
+      `TodaysTasks` already owns it as `today`, so a second `useTaskView` on the
+      same page would have the two widgets overwriting each other's view. It
+      re-reads whenever the store's tasks change identity — every mutation ends
+      in a `refresh()` — which is what keeps it in step with a box ticked in the
+      block above it. Rows are the same `DashboardTaskRow` Today draws, so
+      ticking one off here is the same real mutation it is there
 - [ ] Basic statistics — §36's figures are all measured and drawn, but under
       `/progress/statistics` (Phase 11), not on the dashboard. What is missing
       is the dashboard-sized summary of them, not the numbers

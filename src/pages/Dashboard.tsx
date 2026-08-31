@@ -5,6 +5,7 @@ import FocusWidget from "@/components/dashboard/FocusWidget";
 import ProgressWidget from "@/components/dashboard/ProgressWidget";
 import QuickStart from "@/components/dashboard/QuickStart";
 import TodaysTasks from "@/components/dashboard/TodaysTasks";
+import UpcomingTasks from "@/components/dashboard/UpcomingTasks";
 import { Separator } from "@/components/ui/separator";
 import { formatDayHeading } from "@/lib/task-utils";
 
@@ -49,8 +50,11 @@ function useNow(): Date {
  * (the progress store) will not touch this page.
  *
  * The vertical order is section 7's stated priority, not the order the
- * mockup happens to draw: today's tasks, then quick routine launching, then
- * focus, then progress. Progress comes last and paired with section 44's
+ * mockup happens to draw: today's tasks, then what is coming, then quick
+ * routine launching, then focus, then progress. Upcoming is section 77's
+ * build item rather than anything section 7 illustrates, and it goes directly
+ * under today because that is the one thing section 7 does say about it —
+ * today comes first. Progress comes last and paired with section 44's
  * daily objectives — sections 7 and 50 both put gamification below the
  * productivity system, so the two gamified blocks are the foot of the page
  * and nothing above them refers to XP at all.
@@ -78,12 +82,19 @@ function Dashboard() {
 
       <Separator />
 
-      {/* 2. Quick routine launching — the QUICK START tile row. */}
+      {/* 2. What is next — section 77's "upcoming tasks", grouped by day.
+          Under today rather than beside it: section 7 puts today first, and
+          what is coming is read after what is due, not instead of it. */}
+      <UpcomingTasks />
+
+      <Separator />
+
+      {/* 3. Quick routine launching — the QUICK START tile row. */}
       <QuickStart />
 
       <Separator />
 
-      {/* 3. Focus, then 4. Progress. Both are self-contained cards, so they
+      {/* 4. Focus, then 5. Progress. Both are self-contained cards, so they
           are separated by their own borders rather than another rule. */}
       <FocusWidget />
 

@@ -13,10 +13,19 @@ import { TASK_PRIORITY_LABELS, type Task } from "@/types/task";
 /** The full daily view, where a dashboard row goes when it is clicked. */
 export const TASKS_TODAY_PATH = "/tasks/today";
 
+/** The same, for the rows of `UpcomingTasks` — a future task is not in Today. */
+export const TASKS_UPCOMING_PATH = "/tasks/upcoming";
+
 interface DashboardTaskRowProps {
   task: Task;
-  /** Where the row is in its life on screen, from `TodaysTasks`. */
+  /** Where the row is in its life on screen, from the list that owns it. */
   phase?: ItemPhase;
+  /**
+   * The view this row's task lives in, which is where clicking it goes.
+   * Defaults to Today; `UpcomingTasks` sends its rows to Upcoming, because a
+   * link to a list the task is not on is a link to a search for it.
+   */
+  to?: string;
 }
 
 /**
@@ -33,9 +42,14 @@ interface DashboardTaskRowProps {
  * Two things it does keep are the two things the mockup implies you can do
  * from here: tick a task off, which is the real mutation and not a preview of
  * one, and open the task where it lives.
+ *
+ * Shared by both of the dashboard's task blocks — `TodaysTasks` and
+ * `UpcomingTasks` — so a task reads and behaves identically wherever it is
+ * listed. The only thing either block chooses is {@link
+ * DashboardTaskRowProps.to}, the view its rows belong to.
  */
-function DashboardTaskRow({ task, phase = "present" }: DashboardTaskRowProps) {
-  const toggleTaskCompletion = useTaskStore((state) => state.toggleTaskCompletion);
+function DashboardTaskRow({ task, phase = "present", to = TASKS_TODAY_PATH }: DashboardTaskRowProps) {
+  const setTaskStatus = useTaskStore((state) => state.setTaskStatus);
 
   const isCompleted = task.status === "completed";
   const overdue = formatOverdue(task);
@@ -43,7 +57,12 @@ function DashboardTaskRow({ task, phase = "present" }: DashboardTaskRowProps) {
 
   async function handleToggle() {
     try {
-      await toggleTaskCompletion(task.id);
+      // `setTaskStatus` rather than `toggleTaskCompletion`, which finds the
+      // task in the store's loaded view first and silently does nothing when
+      // it is not there. The store holds one view — Today — so that lookup
+      // would fail for every row of `UpcomingTasks`. The status this row is
+      // drawn from is the status to flip, and it is already in hand.
+      await setTaskStatus(task.id, isCompleted ? "todo" : "completed");
       // The same cue the Tasks page plays, for the same action — the two
       // lists are two views of one thing, and a task ticked off here should
       // not sound different from the same task ticked off there.
@@ -79,7 +98,7 @@ function DashboardTaskRow({ task, phase = "present" }: DashboardTaskRowProps) {
       </Tooltip>
 
       <Link
-        to={TASKS_TODAY_PATH}
+        to={to}
         className={cn(
           "min-w-0 flex-1 truncate text-sm leading-6 hover:underline",
           isCompleted && "text-muted-foreground line-through decoration-muted-foreground/50",
