@@ -1,0 +1,94 @@
+# Keeps `installers/` on `main` holding the installer of the newest published
+# release, so the copy in the repository is never a version behind the one
+# people are actually being offered.
+#
+# It runs when a release is **published**, not when the tag is pushed. That is
+# the difference that matters: `release.yml` publishes a *draft*, and a draft
+# is a release nobody has looked at yet. Committing its installer to `main`
+# would put a binary in front of anyone browsing the repository before the
+# human check that the draft exists to allow — and if the draft is deleted
+# instead of published, `main` would be carrying an installer for a version
+# that was never released.
+#
+# Nothing is rebuilt here. The `.exe` is downloaded from the release, so the
+# file committed to `main` is byte-for-byte the file the release serves and
+# the one the updater installs. A rebuild could differ from it, and then there
+# would be two different binaries with the same version number.
+#
+# The local equivalent, for a build that is not going to be released at all,
+# is `npm run installer:build` (see `scripts/collect-installer.mjs`).
+
+name: Sync installer
+
+on:
+  release:
+    types: [published]
+  # For backfilling: a release published before this workflow existed, or one
+  # whose sync failed and was fixed afterwards.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to sync (default: the latest release)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      # `main` explicitly, not the tag. A release event checks out the commit
+      # the tag points at, which is a detached HEAD with nothing to push to.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Download the installer from the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # Empty only on a manual run with no tag given: ask for the latest.
+          if [ -z "${TAG}" ]; then
+            TAG=$(gh release view --json tagName --jq .tagName)
+            echo "No tag given; using the latest release: ${TAG}"
+          fi
+
+          mkdir -p installers
+
+          # Remove the old one first so the folder holds exactly one installer.
+          # Safe to do before the download because `set -e` fails the job if
+          # the download does not succeed, and a failed job commits nothing.
+          rm -f installers/*-setup.exe
+
+          gh release download "${TAG}" --pattern '*-setup.exe' --dir installers
+
+          ls -la installers
+
+      - name: Commit it to main
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add installers
+
+          # Re-running a sync that already happened is a no-op, not a failure.
+          if git diff --cached --quiet; then
+            echo "installers/ is already up to date; nothing to commit."
+            exit 0
+          fi
+
+          git commit -m "Update installers/ for ${{ github.event.release.tag_name || inputs.tag }}"
+
+          # `main` can have moved while the release was being built and looked
+          # at. Rebasing onto it is right because this commit only ever touches
+          # `installers/`, which nothing else in a normal push writes to.
+          git pull --rebase origin main
+          git push origin HEAD:main

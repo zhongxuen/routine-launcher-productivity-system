@@ -5,6 +5,7 @@ manager, a focus timer, and a light progress layer — so that planning, startin
 working, completing, and tracking all live in one place.
 
 Full specification: `md-files/development-plan.md`.
+What is not built yet, and the prompt to build it: `remaining.md`.
 
 ---
 
@@ -49,6 +50,8 @@ Other commands:
 | `npm run dev` | Vite dev server only (browser; native commands unavailable) |
 | `npm run build` | Type-check and build the frontend |
 | `npm run tauri build` | Produce the Windows installer |
+| `npm run installer:build` | The same, then copy the `.exe` into `installers/` |
+| `npm run installer:collect` | Copy an already-built `.exe` into `installers/` |
 | `cargo check` (in `src-tauri/`) | Type-check the Rust backend |
 | `npm run version:check` | Report the version in each of the five files that carry it |
 | `npm run version:set -- 0.2.0` | Set that version everywhere |
@@ -70,13 +73,17 @@ src/                    React frontend
   widget.tsx            Desktop widget root: one component, no router
   components/           Feature components (dashboard, tasks, routines, focus,
                         cleanup, progress, popup, launcher, widget,
-                        onboarding) + common shell + ui/ (shadcn)
+                        notifications, onboarding, settings) + common shell
+                        + ui/ (shadcn)
   pages/                One component per top-level route
+  hooks/                Cross-component behaviour (task views, focus and window
+                        sync, tray and launcher requests, list animation)
   services/             Typed wrappers over Tauri commands
   stores/               zustand stores
   types/                Shared domain types
-  lib/utils.ts          cn() class-merge helper
-  lib/crash-log.ts      Frontend crash reporting (plan §85)
+  lib/                  Pure helpers shared across features — no React, no
+                        Tauri; `utils.ts` is the cn() class-merge helper and
+                        `crash-log.ts` is frontend crash reporting (plan §85)
   index.css             Tailwind entry + design tokens
 
 src-tauri/              Rust backend
@@ -87,8 +94,18 @@ src-tauri/              Rust backend
 
 database/migrations/    Numbered .sql migrations, embedded at compile time
 
-.github/workflows/      Tag-triggered release build: installers, signatures
-                        and the updater manifest (plan §85)
+scripts/set-version.mjs Reads and writes the version in all five files that
+                        carry it (`npm run version:check` / `version:set`)
+scripts/collect-installer.mjs
+                        Copies the built .exe into installers/
+
+installers/             The current installer, downloadable from the repo
+                        without building it
+
+.github/workflows/      release.yml — tag-triggered build: installers,
+                        signatures and the updater manifest (plan §85)
+                        sync-installer.yml — commits the published release's
+                        .exe back into installers/
 ```
 
 Nothing in the repository is written to at runtime. Everything the installed
@@ -317,7 +334,36 @@ horizontally, on any of them, in either theme.
 | NSIS | `nsis/Routine Launcher_<version>_x64-setup.exe` | The one to hand out |
 | MSI | `msi/Routine Launcher_<version>_x64_en-US.msi` | For Group Policy / `msiexec` deployment |
 
-Both are configured in `src-tauri/tauri.conf.json > bundle`:
+`target/` is not in the repository, so the NSIS one is also copied to
+`installers/` — `npm run installer:build` builds and copies, `npm run
+installer:collect` copies a build that already happened. That is the file to
+link somebody who wants to install the app without cloning and building it,
+and it is why one binary per version is worth carrying: the alternative is
+telling people to install Rust first. It costs ~4 MB of clone size per release
+**permanently**, because git keeps every blob that was ever committed and
+replacing the file next version does not remove the last one. At a few
+releases a year that is noise; if it ever stops being noise, drop the folder
+and point people at the GitHub Release instead.
+
+The two are not the same thing. `installers/` is a convenience copy on `main`;
+the GitHub Release is what the updater reads, and only that carries the signed
+`latest.json`. Neither the tag nor the release is created by copying the file
+here.
+
+Releases keep the copy current by themselves:
+`.github/workflows/sync-installer.yml` fires when a release is **published**,
+downloads its `-setup.exe` and commits it to `main`. Published and not tagged,
+because `release.yml` publishes a draft and a draft is a release nobody has
+looked at yet — syncing on the tag would put a binary in front of anyone
+browsing the repository before the check the draft exists to allow, and would
+strand an installer on `main` for a version that was never released if the
+draft is deleted instead. The file is downloaded from the release rather than
+rebuilt, so it is byte-for-byte the one the release serves and the updater
+installs; a rebuild could differ, and then two different binaries would carry
+the same version number. `npm run installer:build` remains the path for a
+build that is not going to be released.
+
+Both installers are configured in `src-tauri/tauri.conf.json > bundle`:
 
 - **Per-user install** (`nsis.installMode: "currentUser"`). The app writes only
   to its own `AppData` directory and its startup entry is under `HKCU`, so
@@ -677,6 +723,13 @@ succeeding.
 Phase checklist mirroring `md-files/development-plan.md` §72–85 (build order in
 §93). This is the live status of the build — it is updated as work lands.
 
+All fourteen phases have been built. Three plan items are outstanding, and each
+is named on its own line below rather than folded into a phase that claims to
+be finished: the dashboard's Upcoming and statistics blocks (Phase 6), and the
+desktop scanner (Phase 10). Everything else is checked. `remaining.md` carries
+those three with a prompt for each, plus what the plan describes and no phase
+ever scheduled.
+
 **Phase 1 — Foundation** ✅ complete
 
 - [x] Tauri 2 + React + TypeScript + Vite project
@@ -926,7 +979,7 @@ loop with the last step of §89's day, offering to tick the task off; that stays
 an offer, because a finished 50 minutes is not the same claim as a finished
 task.
 
-**Phase 6 — Dashboard**
+**Phase 6 — Dashboard** (two widgets outstanding)
 
 - [x] The page itself (`src/pages/Dashboard.tsx`): §7's greeting and TODAY
       header over the four widgets below, in §7's stated priority order —
@@ -960,10 +1013,14 @@ task.
       data props, which is what let Phase 9 point `progressStore` at
       `xpService` without reopening the component — that swap has since
       happened, and §44's objectives now sit beside it
-- [ ] Upcoming tasks
-- [ ] Basic statistics
+- [ ] Upcoming tasks — §7's mockup puts the next few days under TODAY. There is
+      no such block on the dashboard yet; `/tasks/upcoming` is where the same
+      query is read today
+- [ ] Basic statistics — §36's figures are all measured and drawn, but under
+      `/progress/statistics` (Phase 11), not on the dashboard. What is missing
+      is the dashboard-sized summary of them, not the numbers
 
-**Phase 7 — Notifications + Popup**
+**Phase 7 — Notifications + Popup** ✅ complete
 
 - [x] Task reminders — §24's two forms ("10 minutes before", "At 5:00 PM") as
       five `reminder_*` columns on `tasks`
@@ -1019,7 +1076,7 @@ task.
       mounting §32's checklist panel — a partial run says so and points at the
       app, where Retry lives
 
-**Phase 8 — System Tray + Global Shortcut**
+**Phase 8 — System Tray + Global Shortcut** ✅ complete
 
 - [x] System tray icon + menu — §27's menu, built in Rust
       (`src-tauri/src/services/tray.rs`) because its contents are database
@@ -1066,7 +1123,7 @@ task.
       same `create_task`; only `⏱ Start Focus` is handed to the main window,
       because a focus session is a clock and the clock lives there
 
-**Phase 9 — Simple Gamification**
+**Phase 9 — Simple Gamification** ✅ complete
 
 - [x] XP — §63's `xp_transactions` ledger, not a running total
       (`src-tauri/src/services/xp.rs`): every grant is a row saying what earned
@@ -1143,7 +1200,7 @@ task.
       every load, in every window, so the guard has to be somewhere both
       windows can see
 
-**Phase 10 — Desktop Utilities**
+**Phase 10 — Desktop Utilities** (desktop scanner outstanding)
 
 - [x] Downloads scanner — §§38-39 under `/cleanup/downloads`
       (`src-tauri/src/services/downloads.rs`, `src/components/cleanup/`): a
@@ -1161,7 +1218,10 @@ task.
       outside Downloads — §66 applied to filesystem calls. Move is offered
       beside Delete because it is the recoverable one, and a move never
       overwrites what is already in the destination
-- [ ] Desktop scanner
+- [ ] Desktop scanner — §81’s fifth utility, and the one not built.
+      `/cleanup/desktop` is routed and reachable, but the component behind it
+      is still `PlaceholderView`, so the section says it is empty rather than
+      showing a scan that never ran
 - [x] Duplicate finder — §§38, 40 under `/cleanup/duplicates`
       (`src-tauri/src/services/duplicates.rs`, `src/components/cleanup/`): a
       scan of folders the user chooses — Downloads and Desktop to start with,
@@ -1238,7 +1298,7 @@ task.
       matching, the buckets and the month folders be unit-tested against a
       fixed offset
 
-**Phase 11 — Productivity Analytics** ⬅ current
+**Phase 11 — Productivity Analytics** ✅ complete
 
 Under `/progress/statistics` (`src-tauri/src/services/analytics.rs`,
 `src/components/progress/ProgressStatistics.tsx`). One command returns the
@@ -1311,7 +1371,7 @@ productive time. Shipping it here would have meant a panel arguing with the
 page around it; if it is built later it belongs under its own heading,
 labelled usage time. Left for a Tier 5 pass.
 
-**Phase 12 — Desktop Widget**
+**Phase 12 — Desktop Widget** ✅ complete
 
 - [x] Always-on-top widget window — §83's, and a real fourth Tauri window
       (`widget.html`, `src/widget.tsx`, `services/widget.rs`). Frameless, out
@@ -1358,7 +1418,7 @@ labelled usage time. Left for a Tier 5 pass.
       state, so a focus session keeps running and keeps counting in the main
       window while it comes and goes
 
-**Phase 13 — Polish**
+**Phase 13 — Polish** ✅ complete
 
 - [x] Animations and transitions — one motion scale (`--duration-*`,
       `--ease-soft`) in `index.css`, with the app's own keyframes beside the
@@ -1482,7 +1542,7 @@ labelled usage time. Left for a Tier 5 pass.
       300px wide. Verified by walking all seventeen routes at 680px:
       `scrollWidth` equals `clientWidth` on every one
 
-**Phase 14 — Packaging**
+**Phase 14 — Packaging** ✅ complete
 
 - [x] Windows installer — NSIS and MSI, per-user, with a frozen MSI upgrade
       code so a new release replaces the installed app instead of sitting
@@ -1582,4 +1642,5 @@ carries a checklist of its own scope, and those checklists are updated as part
 of the work they describe — not afterwards as a separate pass.
 
 - [x] `README.md` — phase checklist above
+- [x] `remaining.md` — its own checklist of what is not built
 - [ ] Future docs — add a checklist when the file is created

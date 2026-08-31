@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "version:check": "node scripts/set-version.mjs",
-    "version:set": "node scripts/set-version.mjs"
+    "version:set": "node scripts/set-version.mjs",
+    "installer:build": "tauri build && node scripts/collect-installer.mjs",
+    "installer:collect": "node scripts/collect-installer.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
