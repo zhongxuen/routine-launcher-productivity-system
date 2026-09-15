@@ -237,6 +237,55 @@ pub fn announce_focus_session(app: &AppHandle, session: &FocusSession) {
     }
 }
 
+/// The last focus break whose end was announced, by the id the frontend gave
+/// it.
+///
+/// Every window holding the focus store counts the break down, and each one
+/// reaches the end within a tick of the others — so each one asks. Only the
+/// first ask for a given break is shown; the rest are told they were not
+/// first, which is also how the frontend knows not to play the sound twice.
+/// One slot is enough: there is only ever one break, and a new one replaces
+/// the id before its own end can come round.
+static ANNOUNCED_BREAK: Mutex<Option<String>> = Mutex::new(None);
+
+/// Announces the end of a focus break (section 34), once per break however
+/// many windows ask. Answers true to the caller that got to announce it.
+///
+/// A command rather than something Rust notices for itself because Rust keeps
+/// no break: a break is not focus, has no row, and lives only in the
+/// frontend's focus store. `back_to` is the task or routine the next session
+/// is for, if any, so the notification can say what to get back to.
+///
+/// A notification the OS refuses is logged and still counts as announced — the
+/// caller's sound is then the only cue left, and it should not be skipped
+/// because a toast failed.
+#[tauri::command]
+pub fn announce_break_over(
+    app: AppHandle,
+    break_id: String,
+    minutes: i64,
+    back_to: Option<String>,
+) -> bool {
+    {
+        // Poisoning guards nothing here: the slot is a single id, and the
+        // worst a half-finished writer can leave is a break announced twice.
+        let mut announced = ANNOUNCED_BREAK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if announced.as_deref() == Some(break_id.as_str()) {
+            return false;
+        }
+        *announced = Some(break_id);
+    }
+
+    let (title, body) = notifications::break_over(minutes, back_to.as_deref());
+    if let Err(error) = show(&app, &title, &body, None) {
+        crate::log_error!("[notification] could not announce the end of a break: {error}");
+    }
+
+    true
+}
+
 /// Tells the user, once, that closing the window put the app in the tray
 /// rather than quitting it (development-plan.md section 27).
 ///

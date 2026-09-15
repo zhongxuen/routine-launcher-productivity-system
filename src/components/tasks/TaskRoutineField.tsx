@@ -38,7 +38,8 @@ interface TaskRoutineFieldProps {
  * what every task starts as.
  *
  * Routines are read from the store rather than fetched here; whichever page
- * hosts the form loads them (see `src/pages/Tasks.tsx`). An empty list is
+ * hosts the form loads them (see `src/pages/Tasks.tsx`), and quick-add, which
+ * the shell hosts on every page, loads them when it opens. An empty list is
  * therefore either "no routines yet" or "not read yet", and both want the
  * same thing: the field stays usable, and says why there is nothing in it.
  */

@@ -25,8 +25,8 @@
 import { quickStartRoutines } from "@/components/dashboard/QuickStart";
 import type { RoutineWithActions } from "@/types/routine";
 
-/** The two quick actions of section 28's mockup, plus every routine. */
-export type LauncherItemKind = "routine" | "add-task" | "start-focus";
+/** The two quick actions of section 28's mockup, section 21's Start My Day, and every routine. */
+export type LauncherItemKind = "routine" | "add-task" | "start-focus" | "start-my-day";
 
 export interface LauncherItem {
   /** Stable across renders and unique within a list — the DOM id is built from it. */
@@ -34,7 +34,7 @@ export interface LauncherItem {
   kind: LauncherItemKind;
   /** What the row reads. A routine's own name, as the mockup draws it. */
   label: string;
-  /** The routine's emoji, or null for the two actions and for icon-less routines. */
+  /** The routine's emoji, or null for the quick actions and for icon-less routines. */
   icon: string | null;
   /** A quieter second line — what this row will actually do. */
   hint: string;
@@ -46,7 +46,7 @@ export interface LauncherItem {
 
 /**
  * The full list, unfiltered: routines most-used first, then the quick
- * actions.
+ * actions (section 28's two, and Start My Day).
  *
  * The ordering is `quickStartRoutines`, the same ranking the dashboard's
  * QUICK START row and the popup's launch button use — asked here for every
@@ -78,12 +78,14 @@ export function launcherItems(routines: RoutineWithActions[]): LauncherItem[] {
 }
 
 /**
- * Section 28's `+ Add Task` and `⏱ Start Focus`.
+ * Section 28's `+ Add Task` and `⏱ Start Focus`, then section 21's Start My
+ * Day — after the two the mockup draws, since it is used once a day where
+ * they are used all day.
  *
  * Their keywords are the words someone would plausibly type looking for them
- * — "new" for adding, "timer" and "pomodoro" for focusing — because the
- * labels are the only other thing the query has to match and neither is the
- * only name for what it does.
+ * — "new" for adding, "timer" and "pomodoro" for focusing, "morning" for the
+ * day — because the labels are the only other thing the query has to match
+ * and none is the only name for what it does.
  */
 const QUICK_ACTIONS: LauncherItem[] = [
   {
@@ -103,6 +105,15 @@ const QUICK_ACTIONS: LauncherItem[] = [
     hint: "Opens the timer in the app",
     routine: null,
     keywords: "timer pomodoro session concentrate",
+  },
+  {
+    key: "action-start-my-day",
+    kind: "start-my-day",
+    label: "Start My Day",
+    icon: null,
+    hint: "Opens today's summary in the app",
+    routine: null,
+    keywords: "morning plan planning begin today routine",
   },
 ];
 

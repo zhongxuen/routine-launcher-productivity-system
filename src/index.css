@@ -57,6 +57,14 @@
   --status-in-progress: oklch(0.563 0.123 237.31);
   --status-completed: oklch(0.551 0.154 149.2);
   --status-cancelled: oklch(0.568 0.015 286.067);
+
+  /*
+   * A focus break (section 34). Its own hue, away from every status colour,
+   * because a break is the one clock in the app that is not focus and should
+   * never be mistaken for a session at a glance. Dark enough to clear 4.5:1
+   * on the card, since it is drawn as text.
+   */
+  --focus-break: oklch(0.511 0.096 186.391);
 }
 
 .dark {
@@ -100,6 +108,8 @@
   --status-in-progress: oklch(0.685 0.129 237.31);
   --status-completed: oklch(0.723 0.169 149.579);
   --status-cancelled: oklch(0.602 0.015 285.938);
+
+  --focus-break: oklch(0.777 0.152 181.912);
 }
 
 @theme inline {
@@ -132,6 +142,8 @@
   --color-status-in-progress: var(--status-in-progress);
   --color-status-completed: var(--status-completed);
   --color-status-cancelled: var(--status-cancelled);
+
+  --color-focus-break: var(--focus-break);
 
   --radius-sm: calc(var(--radius) * 0.75);
   --radius-md: calc(var(--radius) * 0.875);

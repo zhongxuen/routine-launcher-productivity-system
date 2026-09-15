@@ -15,6 +15,7 @@ import { actionLabel, hasStartedTimer, runCounts } from "@/lib/routine-utils";
 import { cn } from "@/lib/utils";
 import { useFocusStore } from "@/stores/focusStore";
 import { useRoutineStore } from "@/stores/routineStore";
+import type { ActiveFocusSession } from "@/types/focus-ui";
 import type { ActionRunStatus, RoutineRun, RoutineRunAction } from "@/types/routine-ui";
 
 import RoutineIcon from "./RoutineIcon";
@@ -106,10 +107,10 @@ function RoutineLaunchDialog() {
           ))}
         </ul>
 
-        {/* A task launch reports its focus session in `FocusLine` instead —
-            two timer lines saying different things about the same timer is
-            worse than either of them alone. */}
-        {timerStarted && !run.task && (
+        {/* A task launch, and Start My Day's, reports its focus session in
+            `FocusLine` instead — two timer lines saying different things
+            about the same timer is worse than either of them alone. */}
+        {timerStarted && !run.task && !run.planning && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
             <Timer className="size-4" />
             Focus timer started
@@ -173,20 +174,30 @@ function RoutineLaunchDialog() {
  * is also what makes this panel the cheapest end-to-end proof that section
  * 18's chain is joined up.
  *
- * Nothing is drawn when the launch was not started from a task, or when
- * neither the task nor the routine named a length — in which case no session
- * is started either (see `useFocusLifecycle`), so the panel and the timer
- * agree about there not being one.
+ * Start My Day's planning session (section 21) is the same line under its own
+ * name, matched to the running session by its label and routine rather than
+ * by a task, since it has none.
+ *
+ * Nothing is drawn when the launch was started from neither, or when neither
+ * the task nor the routine named a length — in which case no session is
+ * started either (see `useFocusLifecycle`), so the panel and the timer agree
+ * about there not being one.
  */
 function FocusLine({ run }: { run: RoutineRun }) {
   const session = useFocusStore((state) => state.session);
   const sessionError = useFocusStore((state) => state.sessionError);
 
-  const minutes = run.task?.focusMinutes ?? null;
+  const minutes = run.task?.focusMinutes ?? run.planning?.minutes ?? null;
   if (minutes === null) return null;
 
-  const live =
-    session && run.task && session.taskId === run.task.taskId ? session : null;
+  const isThisSession = (candidate: ActiveFocusSession): boolean =>
+    run.task
+      ? candidate.taskId === run.task.taskId
+      : candidate.taskId === null &&
+        candidate.routineId === run.routineId &&
+        candidate.label === run.planning?.label;
+
+  const live = session && isThisSession(session) ? session : null;
   const isLaunching = run.status === "running";
 
   return (
@@ -194,7 +205,9 @@ function FocusLine({ run }: { run: RoutineRun }) {
       <Timer className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
       <div className="flex flex-col gap-0.5">
         <p className="text-sm">
-          <span className="text-muted-foreground">Focus timer: </span>
+          <span className="text-muted-foreground">
+            {run.planning ? `${run.planning.label} session: ` : "Focus timer: "}
+          </span>
           <span className="font-medium tabular-nums">
             {live ? formatClock(displaySeconds(live)) : formatFocusClock(minutes)}
           </span>

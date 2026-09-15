@@ -1,5 +1,6 @@
 import { useCallback, useEffect } from "react";
 
+import { useDailySettings } from "@/hooks/useDailySettings";
 import { useFocusSync } from "@/hooks/useFocusSync";
 import { useWindowSync } from "@/hooks/useWindowSync";
 import { onWidgetShown, type WidgetMode } from "@/services/widgetService";
@@ -51,6 +52,9 @@ interface WidgetContentProps {
 function WidgetContent({ mode }: WidgetContentProps) {
   useWindowSync();
   useFocusSync();
+  // The widget can start a Custom session of its own, so its focus store
+  // needs section 52's default length as much as the main window's does.
+  useDailySettings();
 
   const needsTasks = mode === "task" || mode === "combined";
   const needsRoutines = mode === "routine";

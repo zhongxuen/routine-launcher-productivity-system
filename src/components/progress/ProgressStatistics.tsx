@@ -12,8 +12,8 @@ import {
   dayTooltip,
   focusBarFraction,
   inWeeks,
-  periodRange,
   shortDate,
+  weekRange,
   weekdayInitial,
   weekdayName,
 } from "@/lib/analytics-utils";
@@ -54,11 +54,16 @@ const NOT_MEASURED = "—";
  *   verdict on a day that never asked anything of them.
  * * **An empty week has no best day.** `mostProductiveDay` is null until
  *   something has actually happened, rather than crowning whichever blank
- *   Monday sorted first.
+ *   day sorted first.
  *
  * The whole tab is one read (`getProductivityStats`), so every panel is
  * measured against the same local day — a load that straddled midnight cannot
  * leave Today and This Week disagreeing about which day it is.
+ *
+ * "This week" starts on the day chosen in Settings (section 52): Monday, or
+ * Sunday. The backend decides the week's dates, and everything here that
+ * names a day — the range under THIS WEEK, the letters under the bars — is
+ * rendered from those dates, so nothing on this tab assumes either one.
  *
  * # Application usage (section 37) is not here
  *
@@ -139,7 +144,7 @@ function Panels({ stats }: { stats: ProductivityStats }) {
           <Completion period={stats.today} />
         </Panel>
 
-        <Panel heading="THIS WEEK" caption={periodRange(stats.week)}>
+        <Panel heading="THIS WEEK" caption={weekRange(stats.week)}>
           <Figure label="Focus" value={formatFocusTime(stats.week.focusSeconds)} icon={Timer} />
           <Figure
             label="Tasks"
@@ -279,7 +284,7 @@ function Absent({ children }: { children: React.ReactNode }) {
  * the next bar will appear.
  *
  * Days still to come are dimmed rather than left out, so the row keeps its
- * width from Monday morning onwards.
+ * width from the week's first morning onwards.
  */
 function WeekTrend({ days, today }: { days: DayStats[]; today: string }) {
   return (

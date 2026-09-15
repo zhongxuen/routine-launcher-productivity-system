@@ -109,7 +109,8 @@ pub const BACKUP_FORMAT_VERSION: i64 = 1;
 /// settings. The rest are here because leaving them out would make the six it
 /// names wrong: a quest completion without its quest, an unlocked achievement
 /// without the unlock, a streak that has to be recomputed from a history that
-/// was not carried.
+/// was not carried. `cleanup_actions` is the same: without it, Organized's
+/// day count and today's cleanup quest would restart from nothing.
 const BACKUP_TABLES: &[&str] = &[
     "settings",
     "task_categories",
@@ -117,6 +118,7 @@ const BACKUP_TABLES: &[&str] = &[
     "routines",
     "routine_actions",
     "tasks",
+    "daily_plans",
     "focus_sessions",
     "quests",
     "quest_completions",
@@ -125,6 +127,7 @@ const BACKUP_TABLES: &[&str] = &[
     "user_achievements",
     "streaks",
     "routine_launches",
+    "cleanup_actions",
 ];
 
 /// One backup file, deserialized.
@@ -658,6 +661,11 @@ mod tests {
              INSERT INTO tasks (title, status, priority, reminder_kind, reminder_time)
              VALUES ('Still open', 'todo', 'normal', 'at_time', '08:30');
 
+             -- Migration 0008's. Rank order is not id order, so a restore
+             -- that renumbered by id would show.
+             INSERT INTO daily_plans (date, task_id, rank)
+             VALUES ('2026-01-06', 2, 1), ('2026-01-06', 1, 2), ('2026-01-07', 2, 1);
+
              INSERT INTO focus_sessions
                  (task_id, routine_id, started_at, ended_at, duration_seconds, completed,
                   interrupted, preset, planned_seconds)
@@ -679,7 +687,13 @@ mod tests {
                                 last_active_date = '2026-01-06' WHERE id = 1;
 
              INSERT INTO routine_launches (routine_id, launched_at)
-             VALUES (1, '2026-01-06 09:00:00');",
+             VALUES (1, '2026-01-06 09:00:00');
+
+             -- Migration 0009's. Noon UTC, days apart, so the two stay on
+             -- two different local days in every timezone the tests run in.
+             INSERT INTO cleanup_actions (utility, action, item_count, created_at)
+             VALUES ('downloads', 'move', 12, '2026-01-03 12:00:00'),
+                    ('screenshots', 'organize', 40, '2026-01-06 12:00:00');",
         )
         .unwrap();
     }
@@ -751,6 +765,85 @@ mod tests {
             after.tables, before.tables,
             "every table should come back exactly as it went out"
         );
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_days_top_priorities_round_trip() {
+        // PLAN TODAY's picks (migration 0008), read back through the service
+        // that draws them, so what is checked is the order the panel shows.
+        use crate::services::daily_plans;
+
+        let mut conn = init_memory_db().unwrap();
+        populate(&conn);
+        assert_eq!(daily_plans::get(&conn, "2026-01-06").unwrap().task_ids, vec![2, 1]);
+
+        let path = temp_path("daily-plans");
+        let written = export_to_file(&conn, "0.1.0", path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            written
+                .counts
+                .iter()
+                .find(|count| count.table == "daily_plans")
+                .map(|count| count.rows),
+            Some(3)
+        );
+
+        daily_plans::set(&conn, "2026-01-06", vec![1]).unwrap();
+        daily_plans::set(&conn, "2026-01-07", Vec::new()).unwrap();
+
+        import_from_file(&mut conn, path.to_str().unwrap()).unwrap();
+
+        assert_eq!(daily_plans::get(&conn, "2026-01-06").unwrap().task_ids, vec![2, 1]);
+        assert_eq!(daily_plans::get(&conn, "2026-01-07").unwrap().task_ids, vec![2]);
+
+        // A backup written before 0008 has no `daily_plans` at all. It still
+        // restores, with no priorities rather than a refusal.
+        let mut older = snapshot(&conn, "0.1.4").unwrap();
+        older.tables.remove("daily_plans");
+        older.schema_version = 7;
+        std::fs::write(&path, serde_json::to_string(&older).unwrap()).unwrap();
+
+        import_from_file(&mut conn, path.to_str().unwrap()).unwrap();
+        assert!(daily_plans::get(&conn, "2026-01-06").unwrap().task_ids.is_empty());
+
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn the_cleanup_record_round_trips_and_an_older_backup_restores_without_it() {
+        // Migration 0009's table, read back through the achievement that
+        // counts it, so what is checked is what the user would see.
+        let mut conn = init_memory_db().unwrap();
+        populate(&conn);
+        let organized_days = |conn: &Connection| -> i64 {
+            crate::services::xp::list_achievements(conn)
+                .unwrap()
+                .into_iter()
+                .find(|a| a.key == "organized")
+                .and_then(|a| a.progress)
+                .map(|progress| progress.current)
+                .unwrap()
+        };
+        assert_eq!(organized_days(&conn), 2);
+
+        let path = temp_path("cleanup-actions");
+        export_to_file(&conn, "0.1.0", path.to_str().unwrap()).unwrap();
+
+        conn.execute("DELETE FROM cleanup_actions", []).unwrap();
+        import_from_file(&mut conn, path.to_str().unwrap()).unwrap();
+        assert_eq!(organized_days(&conn), 2);
+
+        // A backup written before 0009 has no `cleanup_actions` at all. It
+        // still restores, with no cleanup on record rather than a refusal.
+        let mut older = snapshot(&conn, "0.1.4").unwrap();
+        older.tables.remove("cleanup_actions");
+        older.schema_version = 8;
+        std::fs::write(&path, serde_json::to_string(&older).unwrap()).unwrap();
+
+        import_from_file(&mut conn, path.to_str().unwrap()).unwrap();
+        assert_eq!(organized_days(&conn), 0);
 
         std::fs::remove_file(path).unwrap();
     }

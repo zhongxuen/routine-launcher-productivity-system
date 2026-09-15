@@ -35,6 +35,7 @@
 import { toast } from "sonner";
 import { create } from "zustand";
 
+import { emitProgressChanged } from "@/lib/progress-events";
 import {
   archiveLargeFile,
   clearIgnoredLargeFiles,
@@ -391,6 +392,9 @@ async function perform(
     const result = await action();
     dropFile(set, file.path);
     set({ busyPath: null });
+    // Move, Archive and Delete are recorded as cleanup actions, which can
+    // unlock Organized. See `src/lib/progress-events.ts`.
+    emitProgressChanged();
 
     const { title, description } = describe(result);
     toast.success(title, { description });

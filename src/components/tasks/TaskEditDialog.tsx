@@ -1,5 +1,5 @@
 import { Timer } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import InlineError from "@/components/common/states/InlineError";
@@ -22,7 +22,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatFocusLength } from "@/lib/focus-utils";
+import { getTaskReminder } from "@/services/notificationService";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useTaskStore } from "@/stores/taskStore";
+import type { TaskReminder } from "@/types/notification";
 import {
   TASK_PRIORITIES,
   TASK_PRIORITY_LABELS,
@@ -33,10 +36,17 @@ import {
 } from "@/types/task";
 
 import RecurrencePicker from "./RecurrencePicker";
+import TaskCategoryField, { categoryFieldValue, categoryIdFromField } from "./TaskCategoryField";
+import TaskReminderField, {
+  NO_REMINDER_DRAFT,
+  leadTimeDraft,
+  reminderChanged,
+  reminderDraft,
+  reminderInput,
+  saveTaskReminder,
+  type ReminderDraft,
+} from "./TaskReminderField";
 import TaskRoutineField, { routineFieldValue, routineIdFromField } from "./TaskRoutineField";
-
-/** The category select's value for "no category" — Select cannot hold "". */
-const NO_CATEGORY = "none";
 
 /** A stored rule as the picker's draft shape. */
 const toDraft = (rule: TaskRecurrence | undefined): NewTaskRecurrence | null =>
@@ -63,14 +73,11 @@ interface EditFormProps {
 function EditForm({ task, recurrence, onClose }: EditFormProps) {
   const updateTask = useTaskStore((state) => state.updateTask);
   const deleteTask = useTaskStore((state) => state.deleteTask);
-  const categories = useTaskStore((state) => state.categories);
 
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
-  const [categoryId, setCategoryId] = useState(
-    task.category_id === null ? NO_CATEGORY : String(task.category_id),
-  );
+  const [categoryId, setCategoryId] = useState(categoryFieldValue(task.category_id));
   const [dueDate, setDueDate] = useState(task.due_date ?? "");
   const [dueTime, setDueTime] = useState(task.due_time ?? "");
   const [estimate, setEstimate] = useState(
@@ -79,15 +86,79 @@ function EditForm({ task, recurrence, onClose }: EditFormProps) {
   const [routine, setRoutine] = useState(routineFieldValue(task.routine_id));
   const [schedule, setSchedule] = useState<NewTaskRecurrence | null>(toDraft(recurrence));
 
+  // Seeded from the row so the field does not open on "None" and then jump;
+  // the `getTaskReminder` read below is what it settles on.
+  const [storedReminder, setStoredReminder] = useState<TaskReminder | null>(task.reminder);
+  const [reminder, setReminder] = useState<ReminderDraft>(() => reminderDraft(task.reminder));
+  const reminderTouched = useRef(false);
+  // The dates the dialog opened with, fixed for its life: a save that got the
+  // task through but had its reminder refused must still count them as moved.
+  const [openedDates] = useState(() => `${task.due_date} ${task.due_time}`);
+  const [openedWithoutDueTime] = useState(() => task.due_time === null);
+  const defaultReminderMinutes = useSettingsStore(
+    (state) => state.daily.defaultReminderMinutes,
+  );
+  /** Whether the field is showing section 52's default rather than a stored reminder. */
+  const showsDefaultReminder = useRef(false);
+
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const trimmed = title.trim();
   const hadRecurrence = task.recurrence_id !== null;
 
+  // The row can be a read behind — a reminder snoozed from the popup a moment
+  // ago — so the field is filled from the reminder as it is stored now.
+  useEffect(() => {
+    let cancelled = false;
+    getTaskReminder(task.id)
+      .then((stored) => {
+        if (cancelled) return;
+        setStoredReminder(stored);
+        // A default suggested before this landed stays, when there is still
+        // nothing stored for it to be replacing.
+        if (reminderTouched.current) return;
+        if (stored === null && showsDefaultReminder.current) return;
+        showsDefaultReminder.current = false;
+        setReminder(reminderDraft(stored));
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(String(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [task.id]);
+
+  /**
+   * Section 52's default reminder, for a task being given its first due time.
+   *
+   * This is where the default can apply at all: it is "N minutes before", and
+   * the quick-add form cannot give a task the due time that counts back from.
+   * So it follows the due date and time for as long as that is the only
+   * reason the field has a value — the task had no due time and no reminder
+   * when the dialog opened, and nobody has touched the field since — and goes
+   * back to None if the time is cleared again. It is on screen before it is
+   * saved, like any other value in the form.
+   */
+  function followDefaultReminder(nextDate: string, nextTime: string) {
+    if (defaultReminderMinutes === null || reminderTouched.current) return;
+    if (!openedWithoutDueTime || storedReminder !== null) return;
+
+    showsDefaultReminder.current = Boolean(nextDate && nextTime);
+    setReminder(
+      showsDefaultReminder.current ? leadTimeDraft(defaultReminderMinutes) : NO_REMINDER_DRAFT,
+    );
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!trimmed || isSaving) return;
+
+    // A time is only meaningful with a date, and the backend rejects one
+    // without it, so clearing the date clears the time too.
+    const nextDueDate = dueDate || null;
+    const nextDueTime = dueDate && dueTime ? dueTime : null;
 
     setIsSaving(true);
     setError(null);
@@ -96,17 +167,27 @@ function EditForm({ task, recurrence, onClose }: EditFormProps) {
         title: trimmed,
         description: description.trim() || null,
         priority,
-        category_id: categoryId === NO_CATEGORY ? null : Number(categoryId),
-        due_date: dueDate || null,
-        // A time is only meaningful with a date, and the backend rejects one
-        // without it, so clearing the date clears the time too.
-        due_time: dueDate && dueTime ? dueTime : null,
+        category_id: categoryIdFromField(categoryId),
+        due_date: nextDueDate,
+        due_time: nextDueTime,
         estimated_minutes: estimate ? Number(estimate) : null,
         routine_id: routineIdFromField(routine),
         // Sending this only when it changed keeps an ordinary edit from
         // re-timing a series that the user did not touch.
         ...(scheduleChanged(schedule, recurrence) ? { recurrence: schedule } : {}),
       });
+
+      // After the task, because the reminder is judged against the dates just
+      // saved. An unchanged reminder is sent again when those dates moved, so
+      // the backend can refuse one they no longer support rather than let it go
+      // quiet, and a snooze taken against the old dates does not outlive them.
+      const datesMoved = `${nextDueDate} ${nextDueTime}` !== openedDates;
+      if (
+        reminderChanged(reminder, storedReminder) ||
+        (datesMoved && reminderInput(reminder) !== null)
+      ) {
+        await saveTaskReminder(task.id, reminder);
+      }
 
       toast.success("Task saved", { description: trimmed });
       onClose();
@@ -156,7 +237,10 @@ function EditForm({ task, recurrence, onClose }: EditFormProps) {
             id="edit-due-date"
             type="date"
             value={dueDate}
-            onChange={(event) => setDueDate(event.target.value)}
+            onChange={(event) => {
+              setDueDate(event.target.value);
+              followDefaultReminder(event.target.value, dueTime);
+            }}
           />
         </div>
 
@@ -169,9 +253,24 @@ function EditForm({ task, recurrence, onClose }: EditFormProps) {
             type="time"
             value={dueTime}
             disabled={!dueDate}
-            onChange={(event) => setDueTime(event.target.value)}
+            onChange={(event) => {
+              setDueTime(event.target.value);
+              followDefaultReminder(dueDate, event.target.value);
+            }}
           />
         </div>
+
+        <TaskReminderField
+          idPrefix="edit"
+          value={reminder}
+          onChange={(value) => {
+            reminderTouched.current = true;
+            setReminder(value);
+          }}
+          hasDueDate={dueDate !== ""}
+          hasDueTime={dueDate !== "" && dueTime !== ""}
+          className="col-span-2"
+        />
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="edit-priority" className="text-xs text-muted-foreground">
@@ -191,24 +290,7 @@ function EditForm({ task, recurrence, onClose }: EditFormProps) {
           </Select>
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="edit-category" className="text-xs text-muted-foreground">
-            Category
-          </Label>
-          <Select value={categoryId} onValueChange={setCategoryId}>
-            <SelectTrigger id="edit-category" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NO_CATEGORY}>None</SelectItem>
-              {categories.map((category) => (
-                <SelectItem key={category.id} value={String(category.id)}>
-                  {category.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <TaskCategoryField idPrefix="edit" value={categoryId} onChange={setCategoryId} />
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="edit-estimate" className="text-xs text-muted-foreground">

@@ -10,6 +10,8 @@ interface TaskSectionProps {
   showDate?: boolean;
   /** Show each task's repeat schedule — on in the Recurring view. */
   showRecurrence?: boolean;
+  /** Today's top priorities by task id, from PLAN TODAY — on in Today only. */
+  priorityRanks?: ReadonlyMap<number, number>;
 }
 
 /**
@@ -27,7 +29,13 @@ interface TaskSectionProps {
  * frame reads as the app having lost it rather than filed it. Now it dims and
  * collapses, which is the same information with the cause attached.
  */
-function TaskSection({ heading, tasks, showDate, showRecurrence }: TaskSectionProps) {
+function TaskSection({
+  heading,
+  tasks,
+  showDate,
+  showRecurrence,
+  priorityRanks,
+}: TaskSectionProps) {
   const rows = useAnimatedList(tasks, (task) => task.id);
 
   // The heading goes with the last row out. Checked against `rows` rather
@@ -47,6 +55,7 @@ function TaskSection({ heading, tasks, showDate, showRecurrence }: TaskSectionPr
             phase={phase}
             showDate={showDate}
             showRecurrence={showRecurrence}
+            priorityRank={priorityRanks?.get(item.id)}
           />
         ))}
       </ul>

@@ -12,8 +12,10 @@ import { useRoutineStore } from "@/stores/routineStore";
 import RoutineIcon from "./RoutineIcon";
 
 /**
- * The Templates tab (development-plan.md section 64): three starter routines
- * that turn an empty My Routines into a working one in a single press.
+ * The Templates tab (development-plan.md section 64): four starter routines
+ * that turn an empty My Routines into a working one in a single press. The
+ * fourth, Start My Day, is also what the Start My Day dialog offers when no
+ * start-of-day routine is set (section 21).
  *
  * Adding a template creates a real routine through the same store action the
  * builder uses, then opens it in the builder — the paths a template guesses

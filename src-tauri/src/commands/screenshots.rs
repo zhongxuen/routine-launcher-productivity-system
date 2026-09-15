@@ -11,12 +11,17 @@
 //! [`organize_screenshots`] only moves what it is explicitly handed. There is
 //! no command that finds files and acts on them, so there is no path by which
 //! opening the page can move anything.
+//!
+//! An organize that moved at least one file leaves a row in
+//! `cleanup_actions`, for the cleanup quest and the Organized achievement.
+//! The row is written after the move and holds no path.
 
 use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager, State};
 
 use crate::db::DbConnection;
+use crate::services::cleanup_actions::{self, CleanupAction, CleanupUtility};
 use crate::services::screenshots::{
     self, LocalClock, OrganizeRequest, OrganizeResult, RootKind, ScanRoot, ScreenshotScan,
 };
@@ -58,7 +63,17 @@ pub fn organize_screenshots(
         LocalClock::from_db(&conn).map_err(|e| e.to_string())?
     };
 
-    screenshots::organize(&scan_roots(&app), clock, &request).map_err(|e| e.to_string())
+    let result =
+        screenshots::organize(&scan_roots(&app), clock, &request).map_err(|e| e.to_string())?;
+    // `moved`, not the request's length: a skipped file (already in place, or
+    // not one this tool would have found) was not cleaned up.
+    cleanup_actions::note(
+        &db,
+        CleanupUtility::Screenshots,
+        CleanupAction::Organize,
+        result.moved,
+    );
+    Ok(result)
 }
 
 /// Opens one screenshot with whatever the OS opens images with.

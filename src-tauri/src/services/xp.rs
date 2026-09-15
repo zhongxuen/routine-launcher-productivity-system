@@ -31,10 +31,12 @@
 //! | Focus session completed | `services::focus::end` | once per session, and only if it ran |
 //! | Routine launched | `services::routines::prepare_launch` | first launch of the day only |
 //!
-//! Quests are the exception, and deliberately so: a quest is completed by the
-//! user ticking it off, so [`complete_quest`] is reachable from a command.
-//! It is still ledger-guarded (one payout per quest row) and date-guarded (a
-//! quest can only be completed on the day it is active for).
+//! Quests are the exception: the frontend asks for a quest to be paid, so
+//! [`complete_quest`] is reachable from a command. What it is asked is only
+//! *which* quest. Whether that quest is one of today's, and whether its
+//! requirement is met, is decided here against the database by
+//! `services::quests`, and the payout is ledger-guarded (once per quest per
+//! day) and date-guarded (only on the day it is active for).
 //!
 //! # Failures are not the user's problem
 //!
@@ -58,6 +60,7 @@ use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 
 use crate::services::error::{ServiceError, ServiceResult};
+use crate::services::quests;
 use crate::services::validate::{normalize_text, validate_date};
 
 // ---------------------------------------------------------------------------
@@ -90,8 +93,9 @@ pub const ACHIEVEMENT_XP: i64 = 100;
 /// `completed`, which would be exactly the button-clicking section 88 says
 /// XP must not reward. Five minutes is short enough that no real session
 /// misses out and long enough that farming one costs more than the XP is
-/// worth.
-const MIN_REWARDED_FOCUS_SECONDS: i64 = 5 * 60;
+/// worth. `services::quests` holds a session to the same floor before it can
+/// finish a quest.
+pub const MIN_REWARDED_FOCUS_SECONDS: i64 = 5 * 60;
 
 /// XP the *first* level costs. Level `n` costs `LEVEL_XP_STEP * n`, so the
 /// levels get steadily longer without ever becoming a grind (section 45:
@@ -110,9 +114,9 @@ const MAX_LEVEL: i64 = 100;
 const CONSISTENT_STREAK_DAYS: i64 = 7;
 /// Section 47's Focused.
 const FOCUSED_SESSIONS: i64 = 10;
-/// Section 47's Organized. See [`ProgressFacts::cleanup_quests`] for what
-/// counts as a cleanup task.
-const ORGANIZED_CLEANUPS: i64 = 10;
+/// Section 47's Organized, in days. See [`ProgressFacts::cleanup_days`] for
+/// what counts as a cleanup task.
+const ORGANIZED_DAYS: i64 = 10;
 /// Section 47's Deep Work: ten hours, in seconds.
 const DEEP_WORK_SECONDS: i64 = 10 * 60 * 60;
 
@@ -203,7 +207,8 @@ pub enum QuestType {
     /// full-weight objectives.
     Objective,
     /// The lighter band: one task, one session, one routine launched, and
-    /// (from Stage 10) "Organize Downloads". Section 43 prices these at 25.
+    /// the cleanup quests ("Organize Downloads"). Section 43 prices these at
+    /// 25.
     Maintenance,
 }
 
@@ -355,9 +360,8 @@ pub struct Achievement {
 }
 
 /// How far along an achievement is, in whatever unit reads best for it: focus
-/// sessions for Focused, days for Consistent, cleanup quests for Organized,
-/// and whole hours for Deep Work — because "7 / 10" is a sentence and
-/// "25200 / 36000" is not.
+/// sessions for Focused, days for Consistent and Organized, and whole hours
+/// for Deep Work — because "7 / 10" is a sentence and "25200 / 36000" is not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AchievementProgress {
@@ -402,27 +406,6 @@ pub struct XpAward {
     /// unlocked. Usually empty. Their [`ACHIEVEMENT_XP`] is already included
     /// in `total_xp` but not in `granted`, which is the event's own reward.
     pub unlocked: Vec<Achievement>,
-}
-
-/// The quest being completed, as the generator that produced it describes it.
-///
-/// Not a row: the day's quests are derived from the date (see
-/// [`complete_quest`]), so this is what the caller *has* rather than what the
-/// database holds. `id` is the generator's stable id — "tasks-3",
-/// "focus-session" — which is the same string next Monday, so a completion is
-/// keyed by `(id, day)` and finishing an objective this week does not stop
-/// next week's copy from paying out.
-///
-/// There is no reward field. The reward comes from `quest_type`
-/// ([`QuestType::xp_reward`]), which is what keeps a quest worth what section
-/// 43 says its band is worth.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompletedQuest {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub quest_type: QuestType,
-    pub title: String,
 }
 
 /// A finished quest, as `quest_completions` records it (section 62).
@@ -734,14 +717,21 @@ struct ProgressFacts {
     routine_launches: i64,
     completed_focus_sessions: i64,
     focus_seconds: i64,
-    /// Completed maintenance quests — section 47's "cleanup tasks".
+    /// Local days with at least one cleanup action — section 47's "cleanup
+    /// tasks".
     ///
-    /// The plan names Organized before it has described what a cleanup task
-    /// *is*; sections 38-42 then build the desktop utilities and section 43
-    /// prices their reward as a "maintenance quest". So the maintenance
-    /// quests the user has finished are the cleanup tasks they have done,
-    /// and counting the ledger rows is counting them.
-    cleanup_quests: i64,
+    /// A cleanup task is something the user did with one of the cleanup
+    /// utilities (sections 38-42): a move, delete, archive or organize they
+    /// confirmed in a review flow, which `services::cleanup_actions` records
+    /// as a row. Organized counts the *days* with such a row rather than the
+    /// rows, so ten deletes in one sitting are one day of cleanup, not the
+    /// whole achievement — section 88's rule that the reward follows
+    /// meaningful activity rather than repeated clicks.
+    ///
+    /// It used to count completed maintenance quests, back when no quest
+    /// involved the cleanup tools and the count had nothing to do with
+    /// cleanup. Those quests are still paid for; they no longer count here.
+    cleanup_days: i64,
     longest_streak: i64,
 }
 
@@ -759,8 +749,11 @@ fn facts(conn: &Connection) -> ServiceResult<ProgressFacts> {
         focus_seconds: one(
             "SELECT COALESCE(SUM(duration_seconds), 0) FROM focus_sessions WHERE completed = 1",
         )?,
-        cleanup_quests: one(
-            "SELECT COUNT(*) FROM xp_transactions WHERE source = 'maintenance_quest'",
+        // Local days, converted the same way the streak converts its days.
+        // Read here rather than through `cleanup_actions`, which calls into
+        // this module, so the dependency keeps pointing one way.
+        cleanup_days: one(
+            "SELECT COUNT(DISTINCT DATE(created_at, 'localtime')) FROM cleanup_actions",
         )?,
         longest_streak: stored_streak(conn)?.longest_streak,
     })
@@ -779,7 +772,7 @@ fn rules(facts: &ProgressFacts) -> [(&'static str, bool); 6] {
         ("first_routine", facts.routine_launches >= 1),
         ("focused", facts.completed_focus_sessions >= FOCUSED_SESSIONS),
         ("consistent", facts.longest_streak >= CONSISTENT_STREAK_DAYS),
-        ("organized", facts.cleanup_quests >= ORGANIZED_CLEANUPS),
+        ("organized", facts.cleanup_days >= ORGANIZED_DAYS),
         ("deep_work", facts.focus_seconds >= DEEP_WORK_SECONDS),
     ]
 }
@@ -798,7 +791,7 @@ fn progress_towards(key: &str, facts: &ProgressFacts) -> Option<AchievementProgr
     let (current, target) = match key {
         "focused" => (facts.completed_focus_sessions, FOCUSED_SESSIONS),
         "consistent" => (facts.longest_streak, CONSISTENT_STREAK_DAYS),
-        "organized" => (facts.cleanup_quests, ORGANIZED_CLEANUPS),
+        "organized" => (facts.cleanup_days, ORGANIZED_DAYS),
         "deep_work" => (facts.focus_seconds / 3600, DEEP_WORK_SECONDS / 3600),
         _ => return None,
     };
@@ -1028,11 +1021,16 @@ pub fn note(outcome: ServiceResult<XpAward>, occasion: &str) -> Option<XpAward> 
 // Quests (sections 44, 62)
 // ---------------------------------------------------------------------------
 
-/// Records that a quest was finished, and pays for it.
+/// Records that one of today's quests was finished, and pays for it.
+///
+/// The caller names the quest and nothing else. Its title, its reward band
+/// and what finishing it means all come from `services::quests`, which is the
+/// one definition of the pool, so a request cannot describe a quest into
+/// being worth something.
 ///
 /// # Why a quest is stored on completion rather than on offer
 ///
-/// Section 44's quests are *generated*, not authored: `src/lib/quests.ts`
+/// Section 44's quests are *generated*, not authored: `services::quests`
 /// derives the day's two or three from the calendar date, so every window on
 /// every machine offers the same list for the same day without a table having
 /// to agree first. Writing three rows a day forever to describe a pure
@@ -1044,39 +1042,46 @@ pub fn note(outcome: ServiceResult<XpAward>, occasion: &str) -> Option<XpAward> 
 /// the row is created here, at the moment it is first needed, keyed by the
 /// generator's own `key` and the day it was active for.
 ///
-/// # The guards
+/// # The guards, in the order they are checked
 ///
+/// * **A real quest, today.** An id the pool does not know is refused, and so
+///   is a quest dated to any day but today: yesterday's unfinished objectives
+///   are not a pile of XP waiting to be collected on a slow afternoon.
 /// * **Once per quest per day.** The caller re-counts the day on every load
 ///   and will therefore keep concluding "Complete 3 tasks is done" for the
 ///   rest of the day, in every window at once. So the guard cannot be
 ///   memory: it is `(key, active_date)`, which every window can see, plus the
 ///   ledger check behind it. A second call answers with the completion the
-///   first one recorded and grants nothing.
-/// * **Only today.** A quest is completed on the day it belongs to, so
-///   yesterday's unfinished objectives are not a pile of XP waiting to be
-///   collected on a slow afternoon.
+///   first one recorded and grants nothing. It is checked before the two
+///   below so that a quest paid this morning still answers the same way after
+///   the user un-ticks a task or changes the daily quest count.
+/// * **Offered today.** Only the day's two or three can be paid, at the quest
+///   count Settings holds, so meeting an objective the day did not ask for is
+///   not a second way to be paid for the same work.
+/// * **Actually done.** The requirement is re-counted from the database for
+///   the local day — completed tasks, completed focus sessions of the
+///   required length, launches in `routine_launches`, confirmed cleanup
+///   actions — and a quest that is not met is refused with a sentence saying
+///   what is still outstanding. This is section 88: the reward follows the
+///   work, not the request for it.
 /// * **The reward is the type's.** `xp_reward` is written from
-///   [`QuestType::xp_reward`] and the caller's own figure is ignored, so a
-///   quest is worth what section 43 says its band is worth rather than
-///   whatever asked for it.
-///
-/// Whether the quest's requirements were actually *met* is the caller's
-/// judgement and is not re-checked here: the requirements are a client-side
-/// rule over counts the frontend already has (`DailyMetric`), and section 62
-/// stores `requirement` as free text. What this refuses is paying twice, or
-/// paying for the wrong day — the farming section 88 is about.
+///   [`QuestType::xp_reward`], so a quest is worth what section 43 says its
+///   band is worth.
 pub fn complete_quest(
     conn: &Connection,
-    quest: CompletedQuest,
+    quest_id: &str,
     date_key: &str,
 ) -> ServiceResult<QuestCompletion> {
-    let Some(key) = normalize_text(Some(quest.id)) else {
+    let Some(key) = normalize_text(Some(quest_id.to_owned())) else {
         return Err(ServiceError::validation("A quest needs an id."));
     };
-    let Some(title) = normalize_text(Some(quest.title)) else {
-        return Err(ServiceError::validation("A quest needs a title."));
-    };
     let date_key = validate_date(ACTIVE_DATE, date_key)?;
+    let Some(quest) = quests::find(&key) else {
+        return Err(ServiceError::validation(format!(
+            "There is no objective called \"{key}\"."
+        )));
+    };
+    let title = quest.title;
 
     let transaction = conn.unchecked_transaction()?;
 
@@ -1088,14 +1093,10 @@ pub fn complete_quest(
         )));
     }
 
-    let source = quest.quest_type.xp_source();
-    let reward = quest.quest_type.xp_reward();
-    let quest_id = ensure_quest_row(&transaction, &key, &title, quest.quest_type, &date_key)?;
-
     // Already paid for — by an earlier load, or by another window that
     // reached the same conclusion a moment ago. Answer with what it actually
     // granted rather than with what today's pool says the quest is worth.
-    if let Some(recorded) = recorded_completion(&transaction, quest_id)? {
+    if let Some(recorded) = recorded_completion(&transaction, &key, &date_key)? {
         transaction.commit()?;
         return Ok(QuestCompletion {
             quest_id: key,
@@ -1104,14 +1105,41 @@ pub fn complete_quest(
         });
     }
 
+    if !quests::offered_on(&transaction, &date_key)?
+        .iter()
+        .any(|offered| offered.id == quest.id)
+    {
+        return Err(ServiceError::validation(format!(
+            "\"{title}\" is not one of today's objectives."
+        )));
+    }
+
+    let measured = quests::measure(&transaction, quest, &date_key)?;
+    if let Some(outstanding) = measured.shortfall() {
+        let noun = if outstanding.target == 1 {
+            outstanding.noun.to_owned()
+        } else {
+            format!("{}s", outstanding.noun)
+        };
+        return Err(ServiceError::validation(format!(
+            "\"{title}\" is not finished yet: {} of {} {noun} so far today.",
+            outstanding.current, outstanding.target
+        )));
+    }
+
+    let source = quest.quest_type.xp_source();
+    let reward = quest.quest_type.xp_reward();
+    let quest_id = ensure_quest_row(&transaction, &key, title, quest.quest_type, &date_key)?;
+
     transaction.execute(
         "INSERT INTO quest_completions (quest_id, xp_awarded) VALUES (?1, ?2)",
         params![quest_id, reward],
     )?;
     grant(&transaction, source, Some(quest_id), reward)?;
 
-    // Settled for its side effects: a finished maintenance quest is what
-    // Organized counts, so the achievement is judged before this returns.
+    // Settled for its side effects: the quest's XP can be what pushes the
+    // level over, and the achievements are judged before this returns, as
+    // they are after every other award.
     settle(&transaction, source, reward)?;
     transaction.commit()?;
 
@@ -1174,11 +1202,23 @@ fn ensure_quest_row(
     Ok(id)
 }
 
-/// What a quest row has already been paid, if anything.
-fn recorded_completion(conn: &Connection, quest_id: i64) -> ServiceResult<Option<i64>> {
+/// What one quest has already been paid on one day, if anything.
+///
+/// Asked by `(key, active_date)` rather than by row id, so checking does not
+/// create the row: a quest refused below leaves nothing behind.
+fn recorded_completion(
+    conn: &Connection,
+    key: &str,
+    active_date: &str,
+) -> ServiceResult<Option<i64>> {
     let recorded: Option<i64> = conn.query_row(
-        "SELECT (SELECT xp_awarded FROM quest_completions WHERE quest_id = ?1 ORDER BY id LIMIT 1)",
-        params![quest_id],
+        "SELECT (SELECT c.xp_awarded
+                   FROM quest_completions AS c
+                   JOIN quests AS q ON q.id = c.quest_id
+                  WHERE q.key = ?1 AND q.active_date = ?2
+                  ORDER BY c.id
+                  LIMIT 1)",
+        params![key, active_date],
         |row| row.get(0),
     )?;
     Ok(recorded)
@@ -1191,6 +1231,7 @@ const ACTIVE_DATE: &str = "Quest date";
 mod tests {
     use super::*;
     use crate::db::init_memory_db;
+    use crate::services::quests::{DailyMetric, QuestDefinition, Requirement};
     use crate::services::{focus, routines, tasks};
     use serde_json::json;
 
@@ -1224,6 +1265,8 @@ mod tests {
 
     /// Runs a focus session end to end, backdating `started_at` so the
     /// recorded duration survives `focus::end`'s clamp to the wall clock.
+    /// The start is moved back to now afterwards, so a quest counts the
+    /// session for today even when the tests run just after midnight.
     fn a_completed_session(conn: &Connection, seconds: i64) -> i64 {
         let session = focus::start(
             conn,
@@ -1244,6 +1287,11 @@ mod tests {
             session.id,
             serde_json::from_value(json!({ "completed": true, "duration_seconds": seconds }))
                 .unwrap(),
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE focus_sessions SET started_at = datetime('now') WHERE id = ?1",
+            params![session.id],
         )
         .unwrap();
         session.id
@@ -1748,83 +1796,221 @@ mod tests {
         .unwrap()
     }
 
-    fn quest(id: &str, quest_type: &str, title: &str) -> CompletedQuest {
-        serde_json::from_value(json!({ "id": id, "type": quest_type, "title": title })).unwrap()
+    /// Today's quests. Which ones they are depends on the date the tests run
+    /// on, so every quest test below works through whatever today offers
+    /// rather than naming a quest that may not be on the list.
+    fn todays_quests(conn: &Connection) -> Vec<&'static QuestDefinition> {
+        quests::offered_on(conn, &today(conn)).unwrap()
+    }
+
+    /// Does the work a quest asks for, through the same services the app
+    /// uses, so the quest is met the way a user would meet it.
+    fn do_the_work(conn: &Connection, quest: &QuestDefinition) {
+        do_work_for(conn, quest.id, quest.requirements);
+    }
+
+    fn do_work_for(conn: &Connection, label: &str, requirements: &[Requirement]) {
+        for requirement in requirements {
+            for unit in 0..requirement.target {
+                match requirement.metric {
+                    DailyMetric::TasksCompleted => {
+                        complete_task(conn, a_task(conn, &format!("{label} {unit}")));
+                    }
+                    DailyMetric::FocusSessionsCompleted => {
+                        a_completed_session(conn, requirement.min_session_seconds.max(60));
+                    }
+                    DailyMetric::FocusMinutes => {
+                        // One session covers the whole target.
+                        if unit == 0 {
+                            a_completed_session(conn, requirement.target * 60);
+                        }
+                    }
+                    DailyMetric::RoutinesLaunched => {
+                        let id = a_routine(conn, &format!("{label} {unit}"));
+                        routines::prepare_launch(conn, id).unwrap();
+                    }
+                    DailyMetric::DownloadsCleanups => cleaned_up(conn, "downloads"),
+                    DailyMetric::DesktopCleanups => cleaned_up(conn, "desktop"),
+                    DailyMetric::ScreenshotCleanups => cleaned_up(conn, "screenshots"),
+                }
+            }
+        }
+    }
+
+    fn cleaned_up(conn: &Connection, utility: &str) {
+        conn.execute(
+            "INSERT INTO cleanup_actions (utility, action, item_count) VALUES (?1, 'move', 1)",
+            params![utility],
+        )
+        .unwrap();
+    }
+
+    /// The ledger rows quests have written.
+    fn quest_grants(conn: &Connection) -> Vec<XpTransaction> {
+        list_transactions(conn, None)
+            .unwrap()
+            .into_iter()
+            .filter(|row| {
+                matches!(
+                    row.source,
+                    XpSource::DailyObjective | XpSource::MaintenanceQuest
+                )
+            })
+            .collect()
+    }
+
+    fn refusal(outcome: ServiceResult<QuestCompletion>) -> String {
+        match outcome {
+            Err(ServiceError::Validation(message)) => message,
+            other => panic!("expected a refusal, got {other:?}"),
+        }
     }
 
     #[test]
-    fn a_quests_reward_comes_from_its_type() {
+    fn a_quest_not_yet_met_is_refused() {
         let conn = conn();
         let today = today(&conn);
 
-        let objective = complete_quest(
-            &conn,
-            quest("tasks-3", "objective", "Complete 3 tasks"),
-            &today,
-        )
-        .unwrap();
-        let cleanup = complete_quest(
-            &conn,
-            quest("routine-launch", "maintenance", "Launch a routine"),
-            &today,
-        )
-        .unwrap();
+        for quest in todays_quests(&conn) {
+            let message = refusal(complete_quest(&conn, quest.id, &today));
+            assert!(
+                message.starts_with(&format!("\"{}\" is not finished yet: 0 of ", quest.title)),
+                "{}: {message}",
+                quest.id
+            );
+        }
 
-        assert_eq!(objective.xp_awarded, DAILY_OBJECTIVE_XP);
-        assert_eq!(cleanup.xp_awarded, MAINTENANCE_QUEST_XP);
-        assert_eq!(objective.quest_id, "tasks-3");
-        assert_eq!(objective.date_key, today);
+        assert_eq!(total_xp(&conn).unwrap(), 0);
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM quests", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, 0, "a refused quest leaves no row behind");
     }
 
     #[test]
-    fn completing_a_quest_pays_once_however_often_the_day_is_recounted() {
+    fn a_quest_is_refused_until_every_requirement_is_met() {
         let conn = conn();
         let today = today(&conn);
 
-        let first = complete_quest(
-            &conn,
-            quest("tasks-3", "objective", "Complete 3 tasks"),
-            &today,
-        )
-        .unwrap();
+        for quest in todays_quests(&conn) {
+            // Everything but the last unit of work on the last requirement.
+            let (last, rest) = quest.requirements.split_last().unwrap();
+            let mut almost: Vec<Requirement> = rest.to_vec();
+            if last.target > 1 {
+                almost.push(Requirement {
+                    target: last.target - 1,
+                    ..*last
+                });
+            }
+            do_work_for(&conn, quest.id, &almost);
+
+            let message = refusal(complete_quest(&conn, quest.id, &today));
+            assert!(message.contains("is not finished yet"), "{}: {message}", quest.id);
+        }
+        assert!(quest_grants(&conn).is_empty());
+    }
+
+    #[test]
+    fn a_met_quest_pays_its_bands_reward_once() {
+        let conn = conn();
+        let today = today(&conn);
+
+        for quest in todays_quests(&conn) {
+            do_the_work(&conn, quest);
+            let before = total_xp(&conn).unwrap();
+
+            let completion = complete_quest(&conn, quest.id, &today).unwrap();
+
+            let reward = match quest.quest_type {
+                QuestType::Objective => DAILY_OBJECTIVE_XP,
+                QuestType::Maintenance => MAINTENANCE_QUEST_XP,
+            };
+            assert_eq!(completion.quest_id, quest.id);
+            assert_eq!(completion.date_key, today);
+            assert_eq!(completion.xp_awarded, reward);
+            assert_eq!(total_xp(&conn).unwrap(), before + reward, "{}", quest.id);
+        }
+
+        assert_eq!(quest_grants(&conn).len(), todays_quests(&conn).len());
+    }
+
+    #[test]
+    fn a_second_call_pays_nothing() {
+        let conn = conn();
+        let today = today(&conn);
+        let quest = todays_quests(&conn)[0];
+        do_the_work(&conn, quest);
+
+        let first = complete_quest(&conn, quest.id, &today).unwrap();
         let before = total_xp(&conn).unwrap();
 
         // The caller re-counts the day on every load and keeps concluding
         // this quest is finished; it must not keep being paid for it.
-        let second = complete_quest(
-            &conn,
-            quest("tasks-3", "objective", "Complete 3 tasks"),
-            &today,
-        )
-        .unwrap();
+        let second = complete_quest(&conn, quest.id, &today).unwrap();
 
         assert_eq!(second, first);
         assert_eq!(total_xp(&conn).unwrap(), before);
+        assert_eq!(quest_grants(&conn).len(), 1);
+    }
+
+    #[test]
+    fn a_paid_quest_still_answers_after_the_work_is_undone() {
+        // Un-ticking the tasks after the quest paid does not turn the second
+        // call into a refusal: the completion was real when it was recorded.
+        let conn = conn();
+        let today = today(&conn);
+        let quest = todays_quests(&conn)[0];
+        do_the_work(&conn, quest);
+        let first = complete_quest(&conn, quest.id, &today).unwrap();
+
+        conn.execute("UPDATE tasks SET status = 'todo', completed_at = NULL", [])
+            .unwrap();
+        conn.execute("DELETE FROM focus_sessions", []).unwrap();
+        conn.execute("DELETE FROM routine_launches", []).unwrap();
+        conn.execute("DELETE FROM cleanup_actions", []).unwrap();
+
+        assert_eq!(complete_quest(&conn, quest.id, &today).unwrap(), first);
+        assert_eq!(quest_grants(&conn).len(), 1);
+    }
+
+    #[test]
+    fn a_quest_not_offered_today_is_refused_even_when_met() {
+        let conn = conn();
+        let today = today(&conn);
+        let offered = todays_quests(&conn);
+        let other = quests::pool()
+            .find(|quest| !offered.iter().any(|today| today.id == quest.id))
+            .expect("the pool is bigger than one day");
+        do_the_work(&conn, other);
+
+        let message = refusal(complete_quest(&conn, other.id, &today));
         assert_eq!(
-            list_transactions(&conn, None)
-                .unwrap()
-                .iter()
-                .filter(|row| row.source == XpSource::DailyObjective)
-                .count(),
-            1
+            message,
+            format!("\"{}\" is not one of today's objectives.", other.title)
         );
+        assert!(quest_grants(&conn).is_empty());
+    }
+
+    #[test]
+    fn an_unknown_quest_is_refused() {
+        let conn = conn();
+        let message = refusal(complete_quest(&conn, "free-xp", &today(&conn)));
+        assert_eq!(message, "There is no objective called \"free-xp\".");
+        assert_eq!(total_xp(&conn).unwrap(), 0);
     }
 
     #[test]
     fn completions_are_reported_for_the_day_they_belong_to() {
         let conn = conn();
         let today = today(&conn);
-        complete_quest(
-            &conn,
-            quest("tasks-3", "objective", "Complete 3 tasks"),
-            &today,
-        )
-        .unwrap();
+        let quest = todays_quests(&conn)[0];
+        do_the_work(&conn, quest);
+        complete_quest(&conn, quest.id, &today).unwrap();
 
         let recorded = list_quest_completions(&conn, &today).unwrap();
         assert_eq!(recorded.len(), 1);
-        assert_eq!(recorded[0].quest_id, "tasks-3");
-        assert_eq!(recorded[0].xp_awarded, DAILY_OBJECTIVE_XP);
+        assert_eq!(recorded[0].quest_id, quest.id);
+        assert_eq!(recorded[0].xp_awarded, quest.quest_type.xp_reward());
 
         assert!(list_quest_completions(&conn, &yesterday(&conn))
             .unwrap()
@@ -1835,12 +2021,9 @@ mod tests {
     fn the_same_quest_pays_again_on_a_later_day() {
         let conn = conn();
         let today = today(&conn);
-        complete_quest(
-            &conn,
-            quest("tasks-3", "objective", "Complete 3 tasks"),
-            &today,
-        )
-        .unwrap();
+        let quest = todays_quests(&conn)[0];
+        do_the_work(&conn, quest);
+        complete_quest(&conn, quest.id, &today).unwrap();
 
         // Backdate the record so today becomes a fresh day for the same
         // repeating quest — the pool offers it again next week.
@@ -1850,78 +2033,126 @@ mod tests {
         )
         .unwrap();
 
-        let again = complete_quest(
-            &conn,
-            quest("tasks-3", "objective", "Complete 3 tasks"),
-            &today,
-        )
-        .unwrap();
-        assert_eq!(again.xp_awarded, DAILY_OBJECTIVE_XP);
-        assert_eq!(total_xp(&conn).unwrap(), 2 * DAILY_OBJECTIVE_XP);
+        let again = complete_quest(&conn, quest.id, &today).unwrap();
+        assert_eq!(again.xp_awarded, quest.quest_type.xp_reward());
+        assert_eq!(quest_grants(&conn).len(), 2);
     }
 
     #[test]
     fn yesterdays_quest_cannot_be_completed_today() {
         let conn = conn();
-        let refused = complete_quest(
-            &conn,
-            quest("routine-launch", "maintenance", "Launch a routine"),
-            &yesterday(&conn),
-        );
+        let refused = complete_quest(&conn, "routine-launch", &yesterday(&conn));
         assert!(matches!(refused, Err(ServiceError::Validation(_))));
         assert_eq!(total_xp(&conn).unwrap(), 0);
     }
 
-    #[test]
-    fn organized_counts_completed_cleanup_quests() {
-        let conn = conn();
-        let today = today(&conn);
+    /// A cleanup action `days_ago` local days back, as the utilities'
+    /// commands record one.
+    fn cleaned_up_on(conn: &Connection, days_ago: i64) {
+        conn.execute(
+            "INSERT INTO cleanup_actions (utility, action, item_count, created_at)
+             VALUES ('downloads', 'delete', 1, datetime('now', ?1))",
+            params![format!("-{days_ago} days")],
+        )
+        .unwrap();
+    }
 
-        for index in 0..9 {
-            complete_quest(
-                &conn,
-                quest(&format!("cleanup-{index}"), "maintenance", "Tidy up"),
-                &today,
-            )
-            .unwrap();
-        }
-        assert!(achievement_by_key(&conn, "organized")
+    fn organized_unlocked(conn: &Connection) -> bool {
+        achievement_by_key(conn, "organized")
             .unwrap()
             .unwrap()
             .unlocked_at
-            .is_none());
-
-        complete_quest(&conn, quest("cleanup-9", "maintenance", "Tidy up"), &today).unwrap();
-        assert!(achievement_by_key(&conn, "organized")
-            .unwrap()
-            .unwrap()
-            .unlocked_at
-            .is_some());
+            .is_some()
     }
 
     #[test]
-    fn a_quest_needs_an_id_and_a_title() {
+    fn organized_counts_days_with_a_cleanup_action() {
         let conn = conn();
-        let today = today(&conn);
+        for days_ago in 1..10 {
+            cleaned_up_on(&conn, days_ago);
+        }
+        evaluate(&conn).unwrap();
+        assert!(!organized_unlocked(&conn), "nine days is not ten");
 
-        assert!(matches!(
-            complete_quest(&conn, quest("  ", "objective", "Complete 3 tasks"), &today),
-            Err(ServiceError::Validation(_))
-        ));
-        assert!(matches!(
-            complete_quest(&conn, quest("tasks-3", "objective", "  "), &today),
-            Err(ServiceError::Validation(_))
-        ));
+        cleaned_up_on(&conn, 0);
+        evaluate(&conn).unwrap();
+        assert!(organized_unlocked(&conn));
+    }
+
+    #[test]
+    fn many_cleanup_actions_on_one_day_are_one_day() {
+        // Ten deletes in one sitting are one day of cleanup, not the whole
+        // achievement.
+        let conn = conn();
+        for _ in 0..12 {
+            cleaned_up_on(&conn, 0);
+        }
+        evaluate(&conn).unwrap();
+
+        assert!(!organized_unlocked(&conn));
+        let organized = list_achievements(&conn)
+            .unwrap()
+            .into_iter()
+            .find(|a| a.key == "organized")
+            .unwrap();
+        assert_eq!(
+            organized.progress,
+            Some(AchievementProgress {
+                current: 1,
+                target: ORGANIZED_DAYS
+            })
+        );
+    }
+
+    #[test]
+    fn maintenance_quests_no_longer_count_towards_organized() {
+        // "Complete a task" is a maintenance quest and has nothing to do with
+        // cleanup. Ten of them used to unlock Organized. A day pays one, so
+        // ten are written as ten days' worth of completions.
+        let conn = conn();
+        for days_ago in 0..10 {
+            conn.execute(
+                "INSERT INTO quests (key, type, title, xp_reward, active_date)
+                 VALUES ('tasks-1', 'maintenance', 'Complete a task', ?1,
+                         date('now', 'localtime', ?2))",
+                params![MAINTENANCE_QUEST_XP, format!("-{days_ago} days")],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO quest_completions (quest_id, xp_awarded)
+                 VALUES (last_insert_rowid(), ?1)",
+                params![MAINTENANCE_QUEST_XP],
+            )
+            .unwrap();
+        }
+        evaluate(&conn).unwrap();
+
+        assert!(!organized_unlocked(&conn));
+    }
+
+    #[test]
+    fn organized_says_what_it_counts() {
+        let conn = conn();
+        let organized = achievement_by_key(&conn, "organized").unwrap().unwrap();
+        assert_eq!(
+            organized.description.as_deref(),
+            Some("Clean up files on 10 different days.")
+        );
+    }
+
+    #[test]
+    fn a_quest_needs_an_id() {
+        let conn = conn();
+        assert_eq!(
+            refusal(complete_quest(&conn, "  ", &today(&conn))),
+            "A quest needs an id."
+        );
     }
 
     #[test]
     fn a_quest_date_has_to_be_a_date() {
         let conn = conn();
-        let refused = complete_quest(
-            &conn,
-            quest("tasks-3", "objective", "Complete 3 tasks"),
-            "next Tuesday",
-        );
+        let refused = complete_quest(&conn, "tasks-3", "next Tuesday");
         assert!(matches!(refused, Err(ServiceError::Validation(_))));
     }
 

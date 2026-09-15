@@ -55,13 +55,41 @@
  * the database would not do: pausing is arithmetic here rather than a column
  * there, so a window that only heard "something changed" would resume a
  * paused session and count minutes nobody focused. See `src/lib/focus-sync.ts`.
+ *
+ * ---------------------------------------------------------------------------
+ * THE BREAK
+ *
+ * A completed session whose preset names a break — 25/5's five minutes, or
+ * the length set beside Custom — leaves a `breakOffer` next to its completion
+ * card, and `startBreak` turns it into a second, smaller clock: `focusBreak`.
+ *
+ * Everything above about the record is deliberately untrue of it. A break is
+ * not focus, so it writes no row, earns no XP and appears in no statistic,
+ * history or streak (sections 35, 36, 88). It lives here and nowhere else,
+ * which is why closing the app during one loses it — and why the other
+ * windows can only learn of it through `announceFocusBreak`, there being
+ * nothing for them to re-read.
+ *
+ * Every window counts the break down and every one reaches its end. The
+ * notification goes out through Rust, which shows it for the first window to
+ * ask and tells the rest they were not first; that answer is also what keeps
+ * the sound to one window. Starting the next session — from the break or from
+ * anywhere else — is what ends a break that is still on screen.
+ * ---------------------------------------------------------------------------
  */
 
 import { create, type StoreApi } from "zustand";
 
 import { emitFocusSessionEnded } from "@/lib/focus-events";
-import { announceFocusSession } from "@/lib/focus-sync";
-import { hasReachedTarget, sortSessionsByRecency, sqliteTimestamp } from "@/lib/focus-utils";
+import { announceFocusBreak, announceFocusSession } from "@/lib/focus-sync";
+import {
+  breakBackTo,
+  breakMinutesFor,
+  breakRemainingSeconds,
+  hasReachedTarget,
+  sortSessionsByRecency,
+  sqliteTimestamp,
+} from "@/lib/focus-utils";
 import { playSound } from "@/lib/sounds";
 import { emitProgressChanged } from "@/lib/progress-events";
 import { announceDataChanged } from "@/lib/window-sync";
@@ -73,22 +101,41 @@ import {
   newFocusSession,
   startFocusSession,
 } from "@/services/focusService";
+import { announceBreakOver } from "@/services/notificationService";
 import {
+  DEFAULT_CUSTOM_BREAK_MINUTES,
   DEFAULT_CUSTOM_MINUTES,
   FOCUS_PRESETS,
+  MAX_CUSTOM_BREAK_MINUTES,
   MAX_CUSTOM_MINUTES,
   MIN_CUSTOM_MINUTES,
   focusPreset,
   type FocusPresetId,
   type FocusSession,
 } from "@/types/focus";
-import type { ActiveFocusSession, StartFocusOptions } from "@/types/focus-ui";
+import type { ActiveFocusSession, FocusBreak, StartFocusOptions } from "@/types/focus-ui";
+
+/**
+ * The break a completed session has earned, before anyone has taken it: its
+ * length, and the session to start again afterwards.
+ */
+export interface BreakOffer {
+  minutes: number;
+  next: StartFocusOptions;
+}
 
 interface FocusState {
   /** The preset the picker is on. Also what the next Start uses. */
   presetId: FocusPresetId;
   /** The length behind the Custom preset, in minutes. */
   customMinutes: number;
+  /**
+   * Section 52's "Default focus duration": the length Custom starts at, and
+   * goes on showing until somebody changes it. See `followDefaultCustomMinutes`.
+   */
+  defaultCustomMinutes: number;
+  /** The break after a Custom session, in minutes. Zero means none. */
+  customBreakMinutes: number;
 
   /** The session on the clock, or null when nothing is running. */
   session: ActiveFocusSession | null;
@@ -107,6 +154,16 @@ interface FocusState {
    */
   result: FocusSession | null;
   /**
+   * The break the session in `result` can be followed by, or null when it
+   * did not complete or its preset names none. Goes with `result`.
+   */
+  breakOffer: BreakOffer | null;
+  /**
+   * The break on the clock, or waiting to be dismissed once it is over. Null
+   * when there is none. Never at the same time as `session`.
+   */
+  focusBreak: FocusBreak | null;
+  /**
    * A failed *write* — the row could not be started, or could not be ended.
    *
    * Kept rather than thrown because both happen around a clock the user is
@@ -123,6 +180,16 @@ interface FocusState {
 
   selectPreset: (id: FocusPresetId) => void;
   setCustomMinutes: (minutes: number) => void;
+  setCustomBreakMinutes: (minutes: number) => void;
+  /**
+   * Takes on a new default focus duration (section 52) — read at start-up,
+   * or saved from Settings in this window or another.
+   *
+   * Custom's length moves with it only while it still shows the old default.
+   * A length the user typed, or one a task's estimate left behind, is theirs,
+   * and a setting saved in another window has no business overwriting it.
+   */
+  followDefaultCustomMinutes: (minutes: number) => void;
 
   /**
    * Starts a session with the picked preset, or with whatever `options`
@@ -148,6 +215,26 @@ interface FocusState {
   dismissResult: () => void;
 
   /**
+   * Starts the break `breakOffer` describes, in place of the completion card.
+   * Refused while a session is running or starting, or a break already is.
+   */
+  startBreak: () => void;
+  /**
+   * Ends a running break now, as though it had run out — minus the
+   * notification and the sound, because the user is the one who ended it and
+   * is looking at the button.
+   */
+  endBreak: () => void;
+  /**
+   * Starts the session the break followed, again: same preset, task and
+   * routine. Skip while the break runs, and "Start another session" once it
+   * is over. The break stays on screen if the session cannot be started.
+   */
+  continueAfterBreak: () => Promise<void>;
+  /** Puts a break away without starting anything — Done, once it is over. */
+  dismissBreak: () => void;
+
+  /**
    * Picks the clock back up on a session that is still running in the
    * database — what a reloaded window does on mount.
    *
@@ -168,9 +255,16 @@ interface FocusState {
    * what it says. See `src/lib/focus-sync.ts`.
    *
    * Announces nothing itself, which is what keeps two windows from echoing a
-   * pause back and forth forever.
+   * pause back and forth forever. The one exception is a countdown that has
+   * run out here as well, which is finished here too — and whose "nothing is
+   * running" the window that sent it already agrees with.
    */
   adoptSession: (session: ActiveFocusSession | null) => void;
+  /**
+   * Takes on the break as another window reports it. The break's counterpart
+   * of `adoptSession`, and silent for the same reason.
+   */
+  adoptBreak: (focusBreak: FocusBreak | null) => void;
 
   loadHistory: () => Promise<void>;
 }
@@ -199,12 +293,19 @@ const TICK_MS = 250;
  */
 let tickHandle: ReturnType<typeof setInterval> | null = null;
 
+/** The same, for the break's clock. Never running at the same time as the above. */
+let breakTickHandle: ReturnType<typeof setInterval> | null = null;
+
 export const useFocusStore = create<FocusState>((set, get) => ({
   presetId: "25-5",
   customMinutes: DEFAULT_CUSTOM_MINUTES,
+  defaultCustomMinutes: DEFAULT_CUSTOM_MINUTES,
+  customBreakMinutes: DEFAULT_CUSTOM_BREAK_MINUTES,
   session: null,
   isStarting: false,
   result: null,
+  breakOffer: null,
+  focusBreak: null,
   sessionError: null,
   history: [],
   isHistoryLoading: false,
@@ -223,15 +324,34 @@ export const useFocusStore = create<FocusState>((set, get) => ({
     set({ customMinutes: clampMinutes(minutes) });
   },
 
+  setCustomBreakMinutes(minutes) {
+    if (get().session) return;
+    set({ customBreakMinutes: clampBreakMinutes(minutes) });
+  },
+
+  followDefaultCustomMinutes(minutes) {
+    const next = clampMinutes(minutes);
+    const { customMinutes, defaultCustomMinutes } = get();
+    if (next === defaultCustomMinutes) return;
+
+    set({
+      defaultCustomMinutes: next,
+      ...(customMinutes === defaultCustomMinutes ? { customMinutes: next } : {}),
+    });
+  },
+
   async startSession(options) {
     if (get().session || get().isStarting) return;
 
     const minutes = startingMinutes(get(), options);
     // A session started from a task carries its own length, so the picker
     // moves to match it rather than showing a preset the clock is not using.
-    const presetId = options?.minutes != null ? presetForMinutes(minutes) : get().presetId;
+    // The session after a break names its preset outright, so a Custom 25
+    // minutes comes back as Custom rather than as 25/5.
+    const presetId =
+      options?.presetId ?? (options?.minutes != null ? presetForMinutes(minutes) : get().presetId);
 
-    set({ isStarting: true, sessionError: null, result: null });
+    set({ isStarting: true, sessionError: null, result: null, breakOffer: null });
 
     // The clock is deliberately started from the row rather than alongside
     // it: until `start_focus_session` answers there is nothing to end, and a
@@ -261,7 +381,13 @@ export const useFocusStore = create<FocusState>((set, get) => ({
       // read back off the row rather than recomputed here — one answer to
       // "how long is this session", not two that could differ.
       targetSeconds: row.planned_seconds,
-      breakMinutes: focusPreset(row.preset).breakMinutes,
+      // Carried through when the caller knows it — the session after a
+      // break keeps the break it had, whatever this window's Custom field
+      // happens to say.
+      breakMinutes:
+        options?.breakMinutes !== undefined
+          ? options.breakMinutes
+          : breakMinutesFor(row.preset, get().customBreakMinutes),
       startedAt: row.started_at,
       // Measured locally rather than parsed back out of `started_at`, which
       // SQLite writes to the nearest second: the row and this number come
@@ -276,11 +402,20 @@ export const useFocusStore = create<FocusState>((set, get) => ({
       taskTitle: row.task_title ?? options?.taskTitle ?? null,
       routineId: row.routine_id,
       routineName: row.routine_name ?? options?.routineName ?? null,
+      label: options?.label ?? null,
     };
+
+    // Starting focus is what ends a break, wherever it was started from — the
+    // break's own Skip, or Start Focus on the dashboard in the middle of one.
+    // Only once the row exists, though: a session that could not be started
+    // leaves the break where it was rather than taking it away for nothing.
+    const endsBreak = get().focusBreak !== null;
+    stopBreakTicking();
 
     set({
       session,
       isStarting: false,
+      focusBreak: null,
       presetId: session.presetId,
       customMinutes:
         session.presetId === "custom" && minutes ? minutes : get().customMinutes,
@@ -291,6 +426,7 @@ export const useFocusStore = create<FocusState>((set, get) => ({
     // window holding the session this one just replaced has to hear about it
     // before its clock counts another second against a row that has ended.
     announceFocusSession(session);
+    if (endsBreak) announceFocusBreak(null);
   },
 
   pauseSession() {
@@ -350,7 +486,12 @@ export const useFocusStore = create<FocusState>((set, get) => ({
     // stands in until the stored row replaces it — and stays if the write
     // fails, so the user still sees the minutes they earned.
     stopTicking();
-    set({ session: null, result: localRecord(session, outcome), sessionError: null });
+    set({
+      session: null,
+      result: localRecord(session, outcome),
+      breakOffer: outcome.completed ? breakOfferFor(session) : null,
+      sessionError: null,
+    });
 
     // Before the write, for the same reason the clock stops before it: the
     // session is over, and a second window still counting it down would be
@@ -377,13 +518,20 @@ export const useFocusStore = create<FocusState>((set, get) => ({
       row = ended;
     }
 
-    set((state) => ({
-      // Unless another session has already been started on top of this one,
-      // in which case the card belongs to that session's future, not this
-      // session's past.
-      result: state.session ? state.result : row,
-      history: [row, ...state.history.filter((past) => past.id !== row.id)],
-    }));
+    set((state) => {
+      // Unless another session — or the break — has already been started on
+      // top of this one, in which case the card belongs to that future, not
+      // this session's past.
+      const movedOn = state.session !== null || state.focusBreak !== null;
+      return {
+        result: movedOn ? state.result : row,
+        // Decided by the stored row rather than the local guess: when another
+        // window ended the session first, the row is the one that knows
+        // whether it ran its full length.
+        breakOffer: movedOn ? state.breakOffer : row.completed ? breakOfferFor(session) : null,
+        history: [row, ...state.history.filter((past) => past.id !== row.id)],
+      };
+    });
 
     // Announced only now, once the row is stored: a subscriber that re-reads
     // the database — the task list, whose `focus_seconds` this session just
@@ -402,7 +550,62 @@ export const useFocusStore = create<FocusState>((set, get) => ({
   },
 
   dismissResult() {
-    set({ result: null });
+    set({ result: null, breakOffer: null });
+  },
+
+  startBreak() {
+    const { breakOffer, session, isStarting, focusBreak } = get();
+    if (!breakOffer || session || isStarting || focusBreak) return;
+
+    const now = Date.now();
+    const started: FocusBreak = {
+      // Unique enough for the one job it has — telling this break's end
+      // apart from the last one's — and needs no secure context to make.
+      id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+      minutes: breakOffer.minutes,
+      startedAtMs: now,
+      endsAtMs: now + breakOffer.minutes * 60_000,
+      remainingSeconds: breakOffer.minutes * 60,
+      status: "running",
+      endedEarly: false,
+      next: breakOffer.next,
+    };
+
+    // The completion card goes: the break is what comes after it, and the
+    // session it described is already in History.
+    set({ focusBreak: started, result: null, breakOffer: null, sessionError: null });
+
+    startBreakTicking(set, get);
+    announceFocusBreak(started);
+  },
+
+  endBreak() {
+    const focusBreak = get().focusBreak;
+    if (!focusBreak || focusBreak.status !== "running") return;
+
+    stopBreakTicking();
+
+    const ended: FocusBreak = { ...focusBreak, status: "over", remainingSeconds: 0, endedEarly: true };
+    set({ focusBreak: ended });
+    announceFocusBreak(ended);
+  },
+
+  async continueAfterBreak() {
+    const focusBreak = get().focusBreak;
+    if (!focusBreak) return;
+
+    // `startSession` ends the break once the row exists, and reports a
+    // refusal — the task was deleted during the break, say — in
+    // `sessionError`, next to the break it left in place.
+    await get().startSession(focusBreak.next);
+  },
+
+  dismissBreak() {
+    if (!get().focusBreak) return;
+
+    stopBreakTicking();
+    set({ focusBreak: null });
+    announceFocusBreak(null);
   },
 
   async restoreSession() {
@@ -418,7 +621,7 @@ export const useFocusStore = create<FocusState>((set, get) => ({
 
     if (!row) return;
 
-    const session = restoredSession(row);
+    const session = restoredSession(row, get().customBreakMinutes);
     set({
       session,
       result: null,
@@ -439,7 +642,23 @@ export const useFocusStore = create<FocusState>((set, get) => ({
     // re-render every second of it for nothing.
     if (isSameClock(get().session, session)) return;
 
+    // Two windows count the same countdown down, and whichever ticks first
+    // ends it and announces that nothing is running — often a quarter of a
+    // second before this window's own tick would have got there. Taking that
+    // at its word would drop this window straight to an idle clock, losing
+    // the completion card and with it the break it offers. So a countdown
+    // that has run out here too is finished here too: `finishSession` finds
+    // the row already ended and shows the stored one. The sound is left to
+    // the window that got there first.
+    const local = get().session;
+    if (session === null && local !== null && hasRunOut(local)) {
+      void get().finishSession();
+      return;
+    }
+
     stopTicking();
+    // A session on the clock means the break is over, wherever it was ended.
+    if (session) stopBreakTicking();
 
     set({
       session,
@@ -447,11 +666,37 @@ export const useFocusStore = create<FocusState>((set, get) => ({
       // whatever this window was showing about the past goes away with it —
       // including an error about a write another window has since made.
       result: null,
+      breakOffer: null,
+      focusBreak: session ? null : get().focusBreak,
       sessionError: null,
       presetId: session?.presetId ?? get().presetId,
     });
 
     if (session?.status === "running") startTicking(set, get);
+  },
+
+  adoptBreak(focusBreak) {
+    if (isSameBreak(get().focusBreak, focusBreak)) return;
+
+    stopBreakTicking();
+
+    if (focusBreak === null) {
+      set({ focusBreak: null });
+      return;
+    }
+
+    // Re-measured on arrival, so a window that heard late does not show the
+    // other window's second for a tick before correcting itself.
+    const adopted: FocusBreak =
+      focusBreak.status === "running"
+        ? { ...focusBreak, remainingSeconds: breakRemainingSeconds(focusBreak) }
+        : focusBreak;
+
+    // A break started elsewhere replaces the completion card here, exactly
+    // as it did in the window it was started from.
+    set({ focusBreak: adopted, result: null, breakOffer: null, sessionError: null });
+
+    if (adopted.status === "running") startBreakTicking(set, get);
   },
 
   async loadHistory() {
@@ -518,6 +763,58 @@ function stopTicking(): void {
   tickHandle = null;
 }
 
+/**
+ * The break's tick: recomputes what is left, and ends a break that has run
+ * out.
+ *
+ * Ending one is three things, and only the first is this window's alone. The
+ * face turns to "Break over" here and is announced, so a window whose timers
+ * are being throttled catches up at once. The notification and the sound are
+ * claimed from Rust, which says yes to the first window per break — every
+ * window reaches this line within a tick of the others, and one "break over"
+ * is news where two is a bug.
+ */
+function tickBreak(set: Set, get: Get): void {
+  const focusBreak = get().focusBreak;
+  if (!focusBreak || focusBreak.status !== "running") return;
+
+  const remainingSeconds = breakRemainingSeconds(focusBreak);
+  if (remainingSeconds > 0) {
+    if (remainingSeconds !== focusBreak.remainingSeconds) {
+      set({ focusBreak: { ...focusBreak, remainingSeconds } });
+    }
+    return;
+  }
+
+  stopBreakTicking();
+
+  const over: FocusBreak = { ...focusBreak, status: "over", remainingSeconds: 0, endedEarly: false };
+  set({ focusBreak: over });
+  announceFocusBreak(over);
+
+  void announceBreakOver(over.id, over.minutes, breakBackTo(over))
+    .catch((cause: unknown) => {
+      // The notification is lost, but the sound is still owed: a window that
+      // cannot reach Rust is on its own, and one cue is better than none.
+      console.error("Could not announce the end of the break:", cause);
+      return true;
+    })
+    .then((announced) => {
+      if (announced) playSound("break-over");
+    });
+}
+
+function startBreakTicking(set: Set, get: Get): void {
+  stopBreakTicking();
+  breakTickHandle = setInterval(() => tickBreak(set, get), TICK_MS);
+}
+
+function stopBreakTicking(): void {
+  if (breakTickHandle === null) return;
+  clearInterval(breakTickHandle);
+  breakTickHandle = null;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Working out the numbers                                                    */
 /* -------------------------------------------------------------------------- */
@@ -556,6 +853,52 @@ function isSameClock(
     a.pausedMs === b.pausedMs &&
     a.pausedAtMs === b.pausedAtMs
   );
+}
+
+/**
+ * Whether a running countdown has reached its length by the clock, whatever
+ * the last tick got round to writing into `elapsedSeconds`.
+ */
+function hasRunOut(session: ActiveFocusSession): boolean {
+  return (
+    session.status === "running" &&
+    hasReachedTarget({ ...session, elapsedSeconds: elapsedSecondsOf(session) })
+  );
+}
+
+/**
+ * `isSameClock` for the break. The id and where it is up to are the whole
+ * of it: the end instant is fixed when the break starts, and `remainingSeconds`
+ * is recomputed from it by every window on every tick.
+ */
+function isSameBreak(a: FocusBreak | null, b: FocusBreak | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.id === b.id && a.status === b.status && a.endedEarly === b.endedEarly;
+}
+
+/**
+ * The break a completed session has earned, and the session to start again
+ * after it — or null when its preset names none.
+ *
+ * A stopwatch never has one: it has no length to restart with, and a break
+ * implies a cycle a count-up clock does not have.
+ */
+function breakOfferFor(session: ActiveFocusSession): BreakOffer | null {
+  if (!session.breakMinutes || session.targetSeconds === null) return null;
+
+  return {
+    minutes: session.breakMinutes,
+    next: {
+      presetId: session.presetId,
+      minutes: Math.round(session.targetSeconds / 60),
+      breakMinutes: session.breakMinutes,
+      taskId: session.taskId,
+      taskTitle: session.taskTitle,
+      routineId: session.routineId,
+      routineName: session.routineName,
+      label: session.label,
+    },
+  };
 }
 
 /** What a session ended as: the seconds it earned, and whether it finished. */
@@ -625,14 +968,18 @@ function localRecord(
  * that no longer exists, and the alternative — restoring a clock that is
  * standing still and saying nothing about why — is worse than resuming one
  * the user can pause again.
+ *
+ * A Custom session's break is not on the row — it is the picker's, like the
+ * break itself — so it comes back as whatever this window's field says. Nor is
+ * a label: a planning session comes back as a session against its routine.
  */
-function restoredSession(row: FocusSession): ActiveFocusSession {
+function restoredSession(row: FocusSession, customBreakMinutes: number): ActiveFocusSession {
   return {
     id: row.id,
     presetId: row.preset,
     mode: row.planned_seconds === null ? "stopwatch" : "countdown",
     targetSeconds: row.planned_seconds,
-    breakMinutes: focusPreset(row.preset).breakMinutes,
+    breakMinutes: breakMinutesFor(row.preset, customBreakMinutes),
     startedAt: row.started_at,
     startedAtMs: Date.now() - row.elapsed_seconds * 1000,
     status: "running",
@@ -643,6 +990,7 @@ function restoredSession(row: FocusSession): ActiveFocusSession {
     taskTitle: row.task_title,
     routineId: row.routine_id,
     routineName: row.routine_name,
+    label: null,
   };
 }
 
@@ -656,7 +1004,7 @@ function restoredSession(row: FocusSession): ActiveFocusSession {
  * option would.
  */
 function startingMinutes(state: FocusState, options?: StartFocusOptions): number | null {
-  const preset = focusPreset(state.presetId);
+  const preset = focusPreset(options?.presetId ?? state.presetId);
   const requested = options?.minutes ?? preset.focusMinutes;
   if (requested != null) return clampMinutes(requested);
   return preset.mode === "stopwatch" ? null : clampMinutes(state.customMinutes);
@@ -672,4 +1020,10 @@ function presetForMinutes(minutes: number | null): FocusPresetId {
 function clampMinutes(minutes: number): number {
   if (!Number.isFinite(minutes)) return DEFAULT_CUSTOM_MINUTES;
   return Math.min(MAX_CUSTOM_MINUTES, Math.max(MIN_CUSTOM_MINUTES, Math.round(minutes)));
+}
+
+/** The same for the Custom break, where zero is allowed and means none. */
+function clampBreakMinutes(minutes: number): number {
+  if (!Number.isFinite(minutes)) return DEFAULT_CUSTOM_BREAK_MINUTES;
+  return Math.min(MAX_CUSTOM_BREAK_MINUTES, Math.max(0, Math.round(minutes)));
 }

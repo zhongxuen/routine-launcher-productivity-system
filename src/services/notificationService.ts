@@ -187,6 +187,26 @@ export async function sendTestNotification(): Promise<void> {
   return invoke<void>("send_test_notification");
 }
 
+/**
+ * Sends the "break over" notification for a focus break (section 34), and
+ * answers whether this window was the one that sent it.
+ *
+ * Every window running the focus store reaches the end of the same break, and
+ * every one calls this; the backend shows the notification for the first call
+ * per `breakId` and answers false to the rest. The answer is what lets the
+ * caller play the sound once rather than once per window.
+ *
+ * `backTo` is the task or routine the next session is for, so the
+ * notification can say what the user is getting back to.
+ */
+export async function announceBreakOver(
+  breakId: string,
+  minutes: number,
+  backTo: string | null,
+): Promise<boolean> {
+  return invoke<boolean>("announce_break_over", { breakId, minutes, backTo });
+}
+
 // ---------------------------------------------------------------------------
 // Building and describing a reminder
 // ---------------------------------------------------------------------------

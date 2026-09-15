@@ -66,6 +66,28 @@ export interface RoutineRunTask {
 }
 
 /**
+ * The session a Start My Day launch leads to (section 21's "Start 10-minute
+ * planning session"): a labelled one, attached to the routine rather than to
+ * a task. Displayed by the panel and started, like a task's, through
+ * `requestFocus` once the actions are done.
+ */
+export interface RoutineRunPlanning {
+  /** What the clock calls the session — `"Planning"`. */
+  label: string;
+  minutes: number;
+}
+
+/**
+ * What a launch is for, beyond opening the workspace. At most one of the two:
+ * a task (section 18) or Start My Day's planning session (section 21).
+ * Neither is a routine started from its own card.
+ */
+export interface RoutineLaunchOptions {
+  task?: RoutineRunTask;
+  planning?: RoutineRunPlanning;
+}
+
+/**
  * One launch, as the panel in section 32 renders it.
  *
  * The routine's name and icon are copied in rather than looked up by id, so
@@ -90,6 +112,8 @@ export interface RoutineRun {
    * and the focus session it leads to.
    */
   task: RoutineRunTask | null;
+  /** Start My Day's planning session, or null. Never set alongside `task`. */
+  planning: RoutineRunPlanning | null;
 }
 
 /* -------------------------------------------------------------------------- */

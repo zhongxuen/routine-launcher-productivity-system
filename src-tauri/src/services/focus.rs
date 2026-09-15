@@ -118,8 +118,10 @@ impl FocusPreset {
     /// the two presets that name no break: a `Custom` length is a length the
     /// user chose, not a Pomodoro, and a `Stopwatch` has no cycle at all.
     ///
-    /// Nothing schedules this break; it is what the completion notification
-    /// suggests when a session runs out (see `services/notifications.rs`).
+    /// Nothing here times this break: the completion notification suggests it
+    /// (see `services/notifications.rs`), and the frontend's focus store runs
+    /// it, in memory, if the user takes it up. The Custom break the picker can
+    /// add is the frontend's alone, so it is not reflected here.
     pub fn break_minutes(self) -> Option<i64> {
         match self {
             Self::Pomodoro25 => Some(5),

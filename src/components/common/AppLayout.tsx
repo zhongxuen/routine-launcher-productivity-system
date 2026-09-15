@@ -1,10 +1,13 @@
 import { Outlet } from "react-router-dom";
 
 import OnboardingDialog from "@/components/onboarding/OnboardingDialog";
+import QuickAddTask from "@/components/tasks/QuickAddTask";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useDailySettings } from "@/hooks/useDailySettings";
 import { useFocusLifecycle } from "@/hooks/useFocusLifecycle";
 import { useLauncherRequests } from "@/hooks/useLauncherRequests";
 import { useProgressSync } from "@/hooks/useProgressSync";
+import { useQuickAddShortcut } from "@/hooks/useQuickAddShortcut";
 import { useReminderPrompts } from "@/hooks/useReminderPrompts";
 import { useTrayActions } from "@/hooks/useTrayActions";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
@@ -56,6 +59,18 @@ import Sidebar from "./Sidebar";
  * first-launch flag itself on mount and stays invisible unless this is a
  * first launch or Settings has asked for it back. See `OnboardingDialog`.
  *
+ * The seventh is section 16's quick-add. `Ctrl+N` is meant to work from any
+ * page, and a key press should raise the form over what the user is looking
+ * at rather than send them to Tasks for it — so both the key and the dialog
+ * are here, once, for every page. The "+ Add Task" buttons on the Tasks page
+ * and the dashboard raise this same dialog through the task store. See
+ * `useQuickAddShortcut`.
+ *
+ * The eighth is section 52's Daily Settings. They are read by the focus
+ * timer, the quick-add form, the edit dialog and the dashboard's quests, on
+ * whichever page those happen to be, so the one read at launch belongs to the
+ * window. See `useDailySettings`.
+ *
  * **The shell is where section 84's responsive layouts are decided.** The
  * window can be dragged down to 680x560 (`tauri.conf.json`), which is half a
  * screen on a 1366-wide laptop — the width at which somebody actually works
@@ -82,6 +97,8 @@ function AppLayout() {
   useLauncherRequests();
   useTrayActions();
   useUpdateCheck();
+  useQuickAddShortcut();
+  useDailySettings();
 
   return (
     <div className="flex h-full w-full overflow-hidden">
@@ -117,6 +134,7 @@ function AppLayout() {
       </ScrollArea>
 
       <OnboardingDialog />
+      <QuickAddTask />
     </div>
   );
 }

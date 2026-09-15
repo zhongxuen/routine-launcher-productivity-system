@@ -18,6 +18,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { emitProgressChanged } from "@/lib/progress-events";
 import { onDataChanged } from "@/lib/window-sync";
 import { useRoutineStore } from "@/stores/routineStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useTaskStore } from "@/stores/taskStore";
 
 export function useWindowSync(): void {
@@ -29,6 +30,13 @@ export function useWindowSync(): void {
     let cancelled = false;
 
     void onDataChanged((scope) => {
+      if (scope === "settings") {
+        // Section 52's Daily Settings, saved in another window. Nothing to
+        // do with XP, so this is the one scope that stops here.
+        void useSettingsStore.getState().loadDaily();
+        return;
+      }
+
       if (scope === "tasks") {
         void useTaskStore.getState().refresh();
       } else {

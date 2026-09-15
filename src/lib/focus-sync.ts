@@ -32,15 +32,29 @@
  * hear nothing until it ended. Asking on mount is how it finds out, and the
  * answer is an ordinary announcement — so a window that has just restored a
  * session from the database learns that it is actually paused.
+ *
+ * ## Breaks
+ *
+ * The break after a session (section 34) travels the same way on an event of
+ * its own, and for a stronger version of the same reason: a break is not in
+ * the database at all — it is not focus, so it has no row — and a window that
+ * missed its announcement has nothing whatever to re-read. It gets its own
+ * event rather than a field on the session's because the two change at
+ * different moments and never overlap: a session ends before its break can
+ * start, and starting the next session is what ends the break. A window asked
+ * what is running answers with whichever of the two it holds.
  */
 
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { WEBVIEW_ID } from "@/lib/window-sync";
-import type { ActiveFocusSession } from "@/types/focus-ui";
+import type { ActiveFocusSession, FocusBreak } from "@/types/focus-ui";
 
 /** A window saying what the clock now reads. Null means nothing is running. */
 const FOCUS_SESSION_EVENT = "focus://session";
+
+/** A window saying where the break is. Null means there is no break. */
+const FOCUS_BREAK_EVENT = "focus://break";
 
 /** A window asking whoever holds the clock to say so. */
 const FOCUS_REQUEST_EVENT = "focus://request";
@@ -48,6 +62,11 @@ const FOCUS_REQUEST_EVENT = "focus://request";
 interface FocusSessionPayload {
   session: ActiveFocusSession | null;
   /** Which webview sent it, so nobody adopts their own announcement. */
+  source: string;
+}
+
+interface FocusBreakPayload {
+  focusBreak: FocusBreak | null;
   source: string;
 }
 
@@ -83,7 +102,29 @@ export async function onFocusSessionAnnounced(
   });
 }
 
-/** Asks whichever window holds a running session to announce it. */
+/**
+ * Tells the other windows where the break is — started, run out, ended early,
+ * or gone. Fire-and-forget, for the reason {@link announceFocusSession} is.
+ */
+export function announceFocusBreak(focusBreak: FocusBreak | null): void {
+  const payload: FocusBreakPayload = { focusBreak, source: WEBVIEW_ID };
+
+  void emit(FOCUS_BREAK_EVENT, payload).catch((cause) => {
+    console.error("Could not tell the other windows about the focus break:", cause);
+  });
+}
+
+/** Subscribes to the break changing in *another* window. */
+export async function onFocusBreakAnnounced(
+  handler: (focusBreak: FocusBreak | null) => void,
+): Promise<UnlistenFn> {
+  return listen<FocusBreakPayload>(FOCUS_BREAK_EVENT, (event) => {
+    if (event.payload.source === WEBVIEW_ID) return;
+    handler(event.payload.focusBreak);
+  });
+}
+
+/** Asks whichever window holds a running session, or a break, to announce it. */
 export function requestFocusSession(): void {
   const payload: FocusRequestPayload = { source: WEBVIEW_ID };
 
@@ -94,9 +135,9 @@ export function requestFocusSession(): void {
 
 /**
  * Subscribes to another window asking what is running. Answer with
- * {@link announceFocusSession}, and only if there is something to answer
- * with — an empty answer would be indistinguishable from the session having
- * just ended.
+ * {@link announceFocusSession} and {@link announceFocusBreak}, and only with
+ * whichever there is something to answer with — an empty answer would be
+ * indistinguishable from the session, or the break, having just ended.
  */
 export async function onFocusSessionRequested(handler: () => void): Promise<UnlistenFn> {
   return listen<FocusRequestPayload>(FOCUS_REQUEST_EVENT, (event) => {

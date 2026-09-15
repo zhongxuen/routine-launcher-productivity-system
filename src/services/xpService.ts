@@ -24,11 +24,11 @@
  * three, re-read {@link getProgress} to pick up what changed;
  * {@link listXpTransactions} says what the last grant was actually for.
  *
- * {@link completeQuest} is the one exception, because a quest is finished by
- * the user ticking it off rather than by anything the backend can observe. It
- * is still guarded — once per quest per day, only on the day in question, and
- * for what section 43 says the quest's band is worth rather than for whatever
- * was asked.
+ * {@link completeQuest} is the one exception: the checklist asks for a quest to
+ * be paid when it sees one finished. It only names the quest. Rust checks that
+ * the quest is one of today's, re-counts its requirement from the database,
+ * and pays once per quest per day for what section 43 says the band is worth
+ * — so calling it for a quest that is not done earns nothing.
  *
  * Every command rejects with a plain, user-presentable string on failure, so
  * callers can surface `String(error)` straight to a toast.
@@ -123,6 +123,19 @@ export async function listAchievements(): Promise<Achievement[]> {
 // ---------------------------------------------------------------------------
 
 /**
+ * The day's quests (`YYYY-MM-DD`), each with the day's counts against its
+ * requirements — two or three, at the daily quest count Settings holds.
+ *
+ * The pool, the day's pick and the counting all live in Rust
+ * (`services/quests.rs`), which is also what {@link completeQuest} checks
+ * against. Put each one through `evaluateQuest` from `@/lib/quests` to draw
+ * it; there is nothing to decide on this side.
+ */
+export async function getDailyQuests(dateKey: string): Promise<Quest[]> {
+  return invoke<Quest[]>("get_daily_quests", { dateKey });
+}
+
+/**
  * The quests already paid for on a local date (`YYYY-MM-DD`).
  *
  * The checklist finds out a quest is finished by re-counting the day, so it
@@ -138,10 +151,10 @@ export async function listQuestCompletions(dateKey: string): Promise<QuestComple
 /**
  * Records a finished quest and pays for it, answering with what was granted.
  *
- * The quest is passed rather than looked up because the day's quests are
- * generated from the date (`src/lib/quests.ts`) instead of stored — the row
- * behind a completion is created here, at the moment it is first needed,
- * keyed by the quest's own id and the day.
+ * Only the id is sent. The title, the reward and the requirement come from
+ * Rust's own definition of the quest, and the row behind a completion is
+ * created there, at the moment it is first needed, keyed by the quest's id
+ * and the day.
  *
  * Idempotent per quest per day: a second call, from a later load or from
  * another window that reached the same conclusion at the same moment, answers
@@ -151,24 +164,17 @@ export async function listQuestCompletions(dateKey: string): Promise<QuestComple
  *
  * `xpAwarded` is what was actually granted, which is not necessarily the
  * quest's current `xpReward`: a completion recorded under an older balance
- * answers with the figure it was paid. Rejects a quest dated to any day but
- * today — yesterday's unfinished objectives are not a pile of XP waiting to
- * be collected.
+ * answers with the figure it was paid.
  *
- * Whether the quest's requirements were *met* is the caller's judgement: they
- * are a client-side rule over counts the frontend already has, so the
- * checklist that knows "Complete 3 tasks" means three tasks is the thing that
- * decides when to call this.
+ * Rejects, with a sentence fit for the user, a quest dated to any day but
+ * today, one today does not offer, and one whose requirement the database
+ * says is not met yet ("…is not finished yet: 2 of 3 tasks so far today.").
+ * The checklist only calls this for quests Rust's own counts show as done, so
+ * a rejection means the day changed between the read and the call.
  */
 export async function completeQuest(
-  quest: Quest,
+  questId: string,
   dateKey: string,
 ): Promise<QuestCompletion> {
-  return invoke<QuestCompletion>("complete_quest", {
-    // Only the three fields the backend needs to identify and price the
-    // quest. The requirements are a frontend rule and there is nothing
-    // useful the database could do with them.
-    quest: { id: quest.id, type: quest.type, title: quest.title },
-    dateKey,
-  });
+  return invoke<QuestCompletion>("complete_quest", { questId, dateKey });
 }

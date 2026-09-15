@@ -9,7 +9,9 @@
 use tauri::State;
 
 use crate::db::DbConnection;
-use crate::services::tasks::{self, NewTask, Task, TaskFilter, TaskUpdate};
+use crate::services::tasks::{
+    self, NewTask, RepeatPreview, Task, TaskFilter, TaskStatus, TaskUpdate,
+};
 
 #[tauri::command]
 pub fn create_task(db: State<DbConnection>, task: NewTask) -> Result<Task, String> {
@@ -44,6 +46,30 @@ pub fn delete_task(db: State<DbConnection>, id: i64) -> Result<(), String> {
 pub fn list_tasks(db: State<DbConnection>, filter: Option<TaskFilter>) -> Result<Vec<Task>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     tasks::list(&conn, filter.unwrap_or_default()).map_err(|e| e.to_string())
+}
+
+/// One day's tasks for the dated Today view (section 53's Yesterday /
+/// Tomorrow): due on `date` (`YYYY-MM-DD`), with nothing carried over from
+/// earlier days. `statuses` narrows it like `TaskFilter.statuses` does.
+#[tauri::command]
+pub fn list_tasks_for_date(
+    db: State<DbConnection>,
+    date: String,
+    statuses: Option<Vec<TaskStatus>>,
+) -> Result<Vec<Task>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    tasks::list_for_date(&conn, &date, statuses).map_err(|e| e.to_string())
+}
+
+/// The repeating tasks a future `date` will get that are not created yet, for
+/// the read-only Repeats group. Writes nothing; empty for today and earlier.
+#[tauri::command]
+pub fn list_repeats_for_date(
+    db: State<DbConnection>,
+    date: String,
+) -> Result<Vec<RepeatPreview>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    tasks::list_repeats_for_date(&conn, &date).map_err(|e| e.to_string())
 }
 
 /// Brings today's repeating tasks into existence (section 23) and returns the

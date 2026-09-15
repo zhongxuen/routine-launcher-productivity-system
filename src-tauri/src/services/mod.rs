@@ -8,7 +8,8 @@
 //! focus, quests, xp, ...) are added here alongside their features.
 //!
 //! `error` holds the `ServiceError` every service returns, `settings` holds
-//! typed access to the key/value `settings` table, `serde_util` holds
+//! typed access to the key/value `settings` table and section 52's Daily
+//! Settings, which belong to no one feature, `serde_util` holds
 //! the serde helpers their payload structs share, and `validate` holds the
 //! input checks (dates, times, blank text) more than one service needs.
 //!
@@ -24,6 +25,13 @@
 //! completion event so XP is earned from real work instead of from a command
 //! the frontend could invoke. It never calls back into them, so the
 //! dependency only ever points one way.
+//!
+//! `quests` is section 44's daily objectives: the pool, which of it a date
+//! offers, and the day's counts against each quest, read straight from the
+//! tables that record the work. It writes nothing and pays nothing. `xp`
+//! consults it before paying for a quest, and the frontend draws the same
+//! definitions and counts through `get_daily_quests`, so the checklist's tick
+//! and the payout are one decision (section 88).
 //!
 //! `downloads` is Stage 10's Downloads Cleanup (sections 38-39) and the
 //! one service that touches the user's own files rather than this app's
@@ -89,6 +97,17 @@
 //! stop something already running. Like its neighbours it takes no
 //! `DbConnection` and stores nothing.
 //!
+//! `cleanup_actions` is the one place the six utilities above leave a trace
+//! in the database, and it records that something was done, not what it was
+//! done to: which utility, which action, how many items, when, and never a
+//! path. The move, delete, archive and organize commands write a row after
+//! the files have been handled, and the cleanup quest and the Organized
+//! achievement read the rows (sections 44, 47). Nothing reads them to decide
+//! what to do to a file, which is how section 67 survives cleanup joining the
+//! quest system. Like `tasks`, `focus` and `routines`, it hands its event to
+//! `xp`, though only so achievements are judged. A cleanup action earns no XP
+//! of its own (section 88).
+//!
 //! `analytics` is Stage 11's — sections 33, 36 and 82. It is the one service
 //! that owns no table: every figure in it is read across the tables its
 //! neighbours own, and nothing in it writes. It therefore sits *downstream*
@@ -112,6 +131,12 @@
 //! it. Everything the walkthrough asks the user to do — a first task, a first
 //! routine, the link between them — is done through `tasks` and `routines`,
 //! so the only thing it owns is whether it has been seen.
+//!
+//! `daily_plans` is sections 20 and 51's PLAN TODAY, and holds only the part
+//! of it that is a choice: up to three of a day's tasks, in order, keyed by
+//! the local date. The workload and the time left beside them are sums over
+//! `tasks` and the Daily Settings, worked out when the panel is drawn, so
+//! nothing here duplicates what those two already store.
 //!
 //! `startup` is section 85's launch-at-Windows-startup, and the only service
 //! whose state lives outside this app entirely — in the `Run` key of the
@@ -173,6 +198,8 @@
 
 pub mod analytics;
 pub mod backup;
+pub mod cleanup_actions;
+pub mod daily_plans;
 pub mod desktop;
 pub mod downloads;
 pub mod duplicates;
@@ -185,6 +212,7 @@ pub mod logging;
 pub mod notifications;
 pub mod onboarding;
 pub mod popup;
+pub mod quests;
 pub mod quick_launcher;
 pub mod reminders;
 pub mod routine_exec;

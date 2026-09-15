@@ -5,13 +5,19 @@
  *
  * A quest here is **not** a stored row. Section 62's schema can hold one, but
  * writing three rows a day forever to describe a list that is a pure function
- * of the date would be storing a derivation: `src/lib/quests.ts` generates the
- * day's quests from a fixed pool by calendar day, so any window, on any run,
- * on any machine, shows the same three for the same date without a table
- * having to agree. What is worth storing is the other half —
+ * of the date would be storing a derivation: `src-tauri/src/services/quests.rs`
+ * generates the day's quests from a fixed pool by calendar day, so any window,
+ * on any run, on any machine, shows the same three for the same date without
+ * a table having to agree. What is worth storing is the other half —
  * {@link QuestCompletion}, the fact that one was finished and XP was granted
  * for it — because that is a thing that happened rather than a thing that can
  * be recomputed.
+ *
+ * Rust owns the definitions and the counting (section 88): {@link Quest}
+ * arrives from `get_daily_quests` with the day's counts already in it, and
+ * `complete_quest` re-counts them before it pays. Nothing here decides
+ * whether a quest is done; `lib/quests.ts` only turns the counts into a tick
+ * and a progress line.
  *
  * The camelCase here therefore isn't the row-mirroring convention `task.ts`
  * and `focus.ts` keep; there is no row to mirror. It follows `progress.ts`
@@ -27,51 +33,43 @@
 export type QuestType = "objective" | "maintenance";
 
 /**
- * The four things about today that a quest can be measured against.
+ * The things about a day that a quest can be measured against — the
+ * `DailyMetric` enum in `services/quests.rs`, which says exactly what each
+ * one counts.
  *
- * Every one of these is countable from work the user has already done in
- * Stages 1, 2 and 4 — completed tasks, finished focus sessions, launched
- * routines — which is the whole reason the quest list can be honest before
- * the XP backend exists. Nothing here needs Stage 9's tables.
- *
- * There is deliberately no "files cleaned up" metric yet: the cleanup tools
- * are Stage 10, and a quest that cannot be finished is worse than a quest
- * that isn't offered. Section 44's `Organize Downloads` example joins the
- * pool when there is something to organise with.
+ * Every one of these is countable from work the user has already done —
+ * completed tasks, finished focus sessions, launched routines, and cleanup
+ * actions confirmed in one of the cleanup utilities — so a tick on the
+ * checklist always means the work is really done. Launches are *distinct*
+ * routines, so pressing START ten times on one routine is one (section 88).
  */
 export type DailyMetric =
   | "tasksCompleted"
   | "focusSessionsCompleted"
   | "focusMinutes"
-  | "routinesLaunched";
-
-/** What the user has actually done today, counted once and measured against. */
-export interface DailyActivity {
-  /** Tasks whose `completed_at` falls on today. */
-  tasksCompleted: number;
-  /** Focus sessions that ran to their target today (not the abandoned ones). */
-  focusSessionsCompleted: number;
-  /** Focused minutes today, excluding time sessions spent paused. */
-  focusMinutes: number;
-  /**
-   * *Distinct* routines launched today, not launches. Section 88's
-   * anti-farming rule in the smallest possible form: launching the same
-   * routine ten times is one, so a quest cannot be ground out by pressing
-   * START repeatedly.
-   */
-  routinesLaunched: number;
-}
-
-/** A day nothing has happened on yet — and the value used while reads fail. */
-export const EMPTY_ACTIVITY: DailyActivity = {
-  tasksCompleted: 0,
-  focusSessionsCompleted: 0,
-  focusMinutes: 0,
-  routinesLaunched: 0,
-};
+  | "routinesLaunched"
+  | "downloadsCleanups"
+  | "desktopCleanups"
+  | "screenshotCleanups";
 
 /**
- * One condition a quest needs met. A quest's conditions combine with AND.
+ * How many cleanup actions each utility recorded on one local day — the
+ * `get_cleanup_day` payload.
+ *
+ * Actions, not files: organizing forty screenshots at once is one. Storage
+ * has no entry because it has no file actions.
+ */
+export interface CleanupDay {
+  downloads: number;
+  desktop: number;
+  duplicates: number;
+  largeFiles: number;
+  screenshots: number;
+}
+
+/**
+ * One condition a quest needs met, with the day's count against it. A quest's
+ * conditions combine with AND.
  *
  * `noun` is the singular word for one unit of `metric` as *this* quest counts
  * it ("task", "minute"), so the progress line can read "2 of 3 tasks" without
@@ -82,9 +80,11 @@ export interface QuestRequirement {
   /** How many are needed. Always at least 1. */
   target: number;
   noun: string;
+  /** The day's count as Rust read it from the database. Not capped. */
+  current: number;
 }
 
-/** One of the day's objectives. */
+/** One of the day's objectives, as `get_daily_quests` sends it. */
 export interface Quest {
   /**
    * Stable across days — the same quest offered again next week keeps its id,
@@ -95,10 +95,19 @@ export interface Quest {
   type: QuestType;
   /** The checklist line, written the way section 44 writes it. */
   title: string;
-  /** Section 62's `xp_reward`. Section 43's bands: 50 daily, 25 maintenance. */
+  /** What finishing it pays: section 43's band, 50 daily or 25 maintenance. */
   xpReward: number;
   /** Everything that has to be true. Never empty. */
   requirements: QuestRequirement[];
+  /**
+   * The in-app route where the work is done, drawn as a link on the quest's
+   * title. The cleanup quests set it to their utility's `/cleanup` page.
+   *
+   * A link and nothing more: following it opens the page, and whatever
+   * happens to a file after that is the user's own scan, selection and
+   * confirmation (section 67).
+   */
+  href?: string;
 }
 
 /** A quest with today's numbers put through it. */

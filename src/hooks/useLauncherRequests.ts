@@ -1,6 +1,6 @@
 /**
  * The main window's half of the quick launcher's `⏱ Start Focus`
- * (development-plan.md section 28).
+ * (development-plan.md section 28), and of its Start My Day (section 21).
  *
  * The launcher does everything else where it stands — see
  * `src/components/launcher/QuickLauncher.tsx` — because everything else is a
@@ -27,32 +27,47 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 
 import { focusLengthCaption, FOCUS_TIMER_PATH } from "@/hooks/useStartFocus";
-import { onFocusSessionRequested } from "@/lib/launcher-events";
+import { onFocusSessionRequested, onStartMyDayRequested } from "@/lib/launcher-events";
+import { useAppStore } from "@/stores/appStore";
 import { useFocusStore } from "@/stores/focusStore";
+
+const DASHBOARD_PATH = "/";
 
 export function useLauncherRequests(): void {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // `listen` is async, so the subscription can arrive after the shell has
+    // `listen` is async, so a subscription can arrive after the shell has
     // gone — in which case it is dropped rather than left behind.
-    let unlisten: UnlistenFn | null = null;
+    const unlisteners: UnlistenFn[] = [];
     let cancelled = false;
+
+    const keep = (fn: UnlistenFn) => {
+      if (cancelled) fn();
+      else unlisteners.push(fn);
+    };
+    const report = (cause: unknown) => {
+      console.error("Could not subscribe to quick launcher requests:", cause);
+    };
 
     void onFocusSessionRequested(() => {
       void startFromLauncher(navigate);
     })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      })
-      .catch((cause) => {
-        console.error("Could not subscribe to quick launcher requests:", cause);
-      });
+      .then(keep)
+      .catch(report);
+
+    // Section 21's Start My Day. The dashboard mounts the dialog, so that is
+    // where the request is taken — the same two steps as the tray's item.
+    void onStartMyDayRequested(() => {
+      navigate(DASHBOARD_PATH);
+      useAppStore.getState().requestStartMyDay();
+    })
+      .then(keep)
+      .catch(report);
 
     return () => {
       cancelled = true;
-      unlisten?.();
+      for (const unlisten of unlisteners) unlisten();
     };
   }, [navigate]);
 }

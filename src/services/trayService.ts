@@ -29,6 +29,7 @@ const TRAY_ACTION_EVENT = "tray://action";
  */
 export type TrayAction =
   | { kind: "launch-routine"; routine_id: number }
+  | { kind: "start-my-day" }
   | { kind: "start-focus" }
   | { kind: "add-task" }
   | { kind: "open-dashboard" }

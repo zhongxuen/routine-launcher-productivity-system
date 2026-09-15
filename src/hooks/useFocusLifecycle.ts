@@ -64,6 +64,8 @@ export function useFocusLifecycle(): void {
   // the run settles — the timer should not start against a workspace that is
   // still opening — and it arrives here carrying the task, the routine and
   // the length, which is exactly what a session is attached to and sized by.
+  // Start My Day's planning session (section 21) arrives the same way, with a
+  // label where the task would be.
   useEffect(
     () =>
       onFocusIntent((intent) => {
@@ -77,10 +79,12 @@ export function useFocusLifecycle(): void {
 
         void startFocusFor({
           minutes: intent.minutes,
+          breakMinutes: intent.breakMinutes,
           taskId: intent.taskId,
           taskTitle: intent.taskTitle,
           routineId: intent.routineId,
           routineName: intent.routineName,
+          label: intent.label,
         });
       }),
     [],

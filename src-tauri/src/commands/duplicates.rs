@@ -12,9 +12,15 @@
 //! [`move_duplicate_files`] each take an explicit list of paths the user
 //! selected and confirmed. There is no command that takes a scan and acts on
 //! it, so "never automatic" is not something the frontend has to remember.
+//!
+//! The two that act leave a row in `cleanup_actions` once at least one file
+//! was handled, for the cleanup quest and the Organized achievement. The row
+//! is written after the files have been handled and holds no path.
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
+use crate::db::DbConnection;
+use crate::services::cleanup_actions::{self, CleanupAction, CleanupUtility};
 use crate::services::duplicates::{
     self, DuplicateScan, DuplicateScanRequest, FileActionResult,
 };
@@ -63,8 +69,18 @@ pub fn scan_duplicates(
 /// ordinary case (a file open in another program), and the caller needs to
 /// know which ones.
 #[tauri::command]
-pub fn delete_duplicate_files(paths: Vec<String>) -> Result<Vec<FileActionResult>, String> {
-    duplicates::delete_files(&paths).map_err(|e| e.to_string())
+pub fn delete_duplicate_files(
+    db: State<DbConnection>,
+    paths: Vec<String>,
+) -> Result<Vec<FileActionResult>, String> {
+    let results = duplicates::delete_files(&paths).map_err(|e| e.to_string())?;
+    cleanup_actions::note(
+        &db,
+        CleanupUtility::Duplicates,
+        CleanupAction::Delete,
+        succeeded(&results),
+    );
+    Ok(results)
 }
 
 /// Moves the files the user selected and confirmed into `destination`.
@@ -73,10 +89,23 @@ pub fn delete_duplicate_files(paths: Vec<String>) -> Result<Vec<FileActionResult
 /// taken at the destination gets ` (1)` appended.
 #[tauri::command]
 pub fn move_duplicate_files(
+    db: State<DbConnection>,
     paths: Vec<String>,
     destination: String,
 ) -> Result<Vec<FileActionResult>, String> {
-    duplicates::move_files(&paths, &destination).map_err(|e| e.to_string())
+    let results = duplicates::move_files(&paths, &destination).map_err(|e| e.to_string())?;
+    cleanup_actions::note(
+        &db,
+        CleanupUtility::Duplicates,
+        CleanupAction::Move,
+        succeeded(&results),
+    );
+    Ok(results)
+}
+
+/// How many of an action's files were actually handled.
+fn succeeded(results: &[FileActionResult]) -> usize {
+    results.iter().filter(|result| result.ok).count()
 }
 
 /// Opens a file's folder in the file explorer, so the user can look at a copy

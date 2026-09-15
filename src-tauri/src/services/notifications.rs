@@ -2,7 +2,8 @@
 //!
 //! Section 24 shows a reminder as a title, a line about the task and three
 //! buttons; section 34's timer needs the same treatment when a session runs
-//! out. Both are assembled here, as plain values, and `commands/
+//! out, and again when the break after it does. All are assembled here, as
+//! plain values, and `commands/
 //! notification.rs` is what hands them to the OS — services stay free of the
 //! Tauri runtime, the same split `routine_exec` and `commands/routines.rs`
 //! use for launching and emitting.
@@ -191,6 +192,26 @@ pub fn for_focus_session(session: &FocusSession) -> FocusCompleteNotification {
         title: "✅ Focus session complete".to_owned(),
         body,
     }
+}
+
+/// The notification for a focus break that has run out (section 34's 5 of
+/// 25/5).
+///
+/// The break is the one clock with nothing on record — it is not focus, so
+/// there is no row for this to hang off the way [`for_focus_session`] hangs
+/// off an ended session — and it arrives with only what the frontend knows:
+/// how long the break was, and the task or routine the next session is for.
+/// That name is the whole point of the body: the break is over, and the thing
+/// to get back to is the thing the user was on.
+pub fn break_over(minutes: i64, back_to: Option<&str>) -> (String, String) {
+    let mut body = format!("Your {}-minute break is over.", minutes.max(1));
+
+    match back_to {
+        Some(name) => body.push_str(&format!(" Back to {name} when you're ready.")),
+        None => body.push_str(" Start another session when you're ready."),
+    }
+
+    ("☕ Break over".to_owned(), body)
 }
 
 /// The one-off notice that closing the window did not close the app
@@ -421,5 +442,29 @@ mod tests {
 
         let brief = for_focus_session(&session(FocusPreset::Custom, 30, None));
         assert_eq!(brief.body, "Under a minute of focus.");
+    }
+
+    #[test]
+    fn a_break_that_ran_out_names_what_to_get_back_to() {
+        let (title, body) = break_over(5, Some("Finish report"));
+
+        assert_eq!(title, "☕ Break over");
+        assert_eq!(
+            body,
+            "Your 5-minute break is over. Back to Finish report when you're ready."
+        );
+    }
+
+    #[test]
+    fn a_break_after_a_session_attached_to_nothing_still_reads_properly() {
+        let (_, body) = break_over(15, None);
+        assert_eq!(
+            body,
+            "Your 15-minute break is over. Start another session when you're ready."
+        );
+
+        // A length the frontend should never send is not worded as "0-minute".
+        let (_, body) = break_over(0, None);
+        assert!(body.starts_with("Your 1-minute break"), "{body}");
     }
 }

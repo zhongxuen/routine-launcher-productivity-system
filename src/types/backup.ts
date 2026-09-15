@@ -73,6 +73,7 @@ export const BACKUP_TABLE_LABELS: Record<string, string> = {
   routines: "Routines",
   routine_actions: "Routine actions",
   tasks: "Tasks",
+  daily_plans: "Top priorities",
   focus_sessions: "Focus sessions",
   quests: "Quests",
   quest_completions: "Quest completions",
@@ -81,6 +82,7 @@ export const BACKUP_TABLE_LABELS: Record<string, string> = {
   user_achievements: "Unlocked achievements",
   streaks: "Streak",
   routine_launches: "Routine launches",
+  cleanup_actions: "Cleanup history",
 };
 
 /** The user-facing name of a backed-up table. */

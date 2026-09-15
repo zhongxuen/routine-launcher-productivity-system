@@ -4,7 +4,7 @@ import { Loader2, Search } from "lucide-react";
 import ErrorState from "@/components/common/states/ErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useWindowSync } from "@/hooks/useWindowSync";
-import { requestFocusSession } from "@/lib/launcher-events";
+import { requestFocusSession, requestStartMyDay } from "@/lib/launcher-events";
 import { runCounts } from "@/lib/routine-utils";
 import { todayKey } from "@/lib/task-utils";
 import { cn } from "@/lib/utils";
@@ -54,12 +54,14 @@ import { filterLauncherItems, launcherItems, type LauncherItem } from "./launche
  * type, which is the opposite of the point. The mouse is supported by making
  * hover move the same selection, so there is only ever one current row.
  *
- * **Every row finishes here except one.** Launching a routine is the same
+ * **Every row finishes here except two.** Launching a routine is the same
  * `launch_routine` the dashboard and the popup call, recorded the same way;
  * adding a task is the same `create_task` with the same defaults the popup
  * uses. `⏱ Start Focus` is the exception and `src/lib/launcher-events.ts`
  * says why: a focus session is a clock, the clock lives in the main window,
- * and a row written from here would be a timer nobody is watching.
+ * and a row written from here would be a timer nobody is watching. Start My
+ * Day is the other, for the same reason: its dialog, its launch panel and
+ * its planning session all belong to the main window.
  *
  * **Two things it has to do that a web page would not.** It sizes its own
  * window — Rust clamps the number, the frontend measures it — because a
@@ -286,6 +288,14 @@ function QuickLauncher() {
         // window out from behind the tray so there is something to watch it
         // on, and gets out of the way. See `src/lib/launcher-events.ts`.
         requestFocusSession();
+        void focusMainWindow();
+        void dismissQuickLauncher();
+        return;
+      case "start-my-day":
+        // The same shape, for the same reason: the dialog, the launch panel
+        // it hands over to and the planning session's clock all live in the
+        // main window.
+        requestStartMyDay();
         void focusMainWindow();
         void dismissQuickLauncher();
     }

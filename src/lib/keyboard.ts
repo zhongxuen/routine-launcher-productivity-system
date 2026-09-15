@@ -2,8 +2,9 @@
  * The two questions a window-level key handler has to be able to answer
  * (development-plan.md section 84).
  *
- * The app binds two shortcuts on `window`: `Ctrl+N` on the Tasks page
- * (section 16) and `Escape` in the compact popup (section 25). Both are bound
+ * The app binds two shortcuts on `window`: `Ctrl+N` in the main window
+ * (section 16, `useQuickAddShortcut`) and `Escape` in the compact popup
+ * (section 25). Both are bound
  * there deliberately — they should work whatever has focus — and both are
  * therefore capable of firing over the top of something the user is already
  * in the middle of. This file is what stops that.

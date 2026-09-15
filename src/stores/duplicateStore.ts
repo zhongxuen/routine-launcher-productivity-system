@@ -39,6 +39,7 @@
 import { create } from "zustand";
 
 import { buildActionReport, copiesIn, selectedFiles } from "@/lib/duplicate-utils";
+import { emitProgressChanged } from "@/lib/progress-events";
 import {
   chooseDestinationFolder,
   chooseScanFolders,
@@ -337,6 +338,9 @@ export const useDuplicateStore = create<DuplicateState>((set, get) => ({
     try {
       const outcomes = await deleteDuplicateFiles(files.map((file) => file.path));
       set({ report: buildActionReport("delete", null, outcomes, files), isActing: false });
+      // The delete was recorded as a cleanup action, which can unlock
+      // Organized. See `src/lib/progress-events.ts`.
+      emitProgressChanged();
       await performScan(set, get, true);
     } catch (error) {
       set({ error: String(error), isActing: false });
@@ -371,6 +375,7 @@ export const useDuplicateStore = create<DuplicateState>((set, get) => ({
         report: buildActionReport("move", destination, outcomes, files),
         isActing: false,
       });
+      emitProgressChanged();
       await performScan(set, get, true);
     } catch (error) {
       set({ error: String(error), isActing: false });

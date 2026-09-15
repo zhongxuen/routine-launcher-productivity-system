@@ -10,12 +10,14 @@ import {
 import AboutCard from "@/components/settings/AboutCard";
 import CloseToTrayCard from "@/components/settings/CloseToTrayCard";
 import CommandActionsCard from "@/components/settings/CommandActionsCard";
+import DailySettingsCard from "@/components/settings/DailySettingsCard";
 import DataCard from "@/components/settings/DataCard";
 import DesktopWidgetCard from "@/components/settings/DesktopWidgetCard";
 import DiagnosticsCard from "@/components/settings/DiagnosticsCard";
 import MotionSoundCard from "@/components/settings/MotionSoundCard";
 import QuickLauncherCard from "@/components/settings/QuickLauncherCard";
 import StartupCard from "@/components/settings/StartupCard";
+import TaskCategoriesCard from "@/components/settings/TaskCategoriesCard";
 import UpdatesCard from "@/components/settings/UpdatesCard";
 import WalkthroughCard from "@/components/settings/WalkthroughCard";
 import { useThemeStore, type ThemePreference } from "@/stores/themeStore";
@@ -27,6 +29,11 @@ function Settings() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+
+      {/* Section 52's Daily Settings, first: they shape every day the app is
+          used — the defaults new work starts with and where the week begins —
+          where everything below is set once and left alone. */}
+      <DailySettingsCard />
 
       <Card className="max-w-xl">
         <CardHeader>
@@ -77,8 +84,13 @@ function Settings() {
 
       <WalkthroughCard />
 
+      {/* Section 13's categories. The first card about what the app holds
+          rather than how it behaves, so it opens that half of the page —
+          directly above Data, which is the rest of it. */}
+      <TaskCategoriesCard />
+
       {/* Section 69's Data group. Last of the working settings, and after
-          the walkthrough on purpose: everything above changes how the app
+          the walkthrough on purpose: the switches above change how the app
           behaves, and this one changes what it holds. Export, Import and
           Reset are also the only controls on this page that can lose
           something, so they sit at the end rather than in the middle of the
@@ -102,11 +114,6 @@ function Settings() {
       <DiagnosticsCard />
 
       <AboutCard />
-
-      <p className="text-sm text-muted-foreground">
-        The remaining settings groups (daily start time, default focus length, notifications)
-        arrive with their features.
-      </p>
     </div>
   );
 }

@@ -94,7 +94,7 @@ function OnboardingTaskStep() {
 
       <p className="text-xs text-muted-foreground">
         {createdTask
-          ? "Tasks can also carry a due date, a priority, a repeat and a reminder — all of that is on the full Add task form."
+          ? "Tasks can also carry a due date, a priority, a repeat and a reminder, all on the full Add task form. For a reminder minutes before a due time, click the task to give it one."
           : "Nothing here is permanent, and you can skip this step. Ctrl+N opens the full form from anywhere in the app."}
       </p>
     </div>

@@ -53,10 +53,26 @@ export const FOCUS_PRESETS: FocusPreset[] = [
 export const focusPreset = (id: FocusPresetId): FocusPreset =>
   FOCUS_PRESETS.find((preset) => preset.id === id) ?? FOCUS_PRESETS[0];
 
-/** What the Custom field starts at, and the range it accepts. */
-export const DEFAULT_CUSTOM_MINUTES = 45;
+/**
+ * What the Custom field starts at, and the range it accepts.
+ *
+ * The starting length is really section 52's "Default focus duration" (see
+ * `followDefaultCustomMinutes` in the focus store). This is that setting's
+ * own default, so a window shows the same number before its first read of
+ * the settings as after it on a fresh install.
+ */
+export const DEFAULT_CUSTOM_MINUTES = 50;
 export const MIN_CUSTOM_MINUTES = 1;
 export const MAX_CUSTOM_MINUTES = 480;
+
+/**
+ * The break beside Custom. Zero means none, and is the default: a Custom
+ * length is one the user chose, not a Pomodoro, so it only gets a break when
+ * they ask for one. An hour is the longest of the presets' breaks four times
+ * over — anything longer is not a break.
+ */
+export const DEFAULT_CUSTOM_BREAK_MINUTES = 0;
+export const MAX_CUSTOM_BREAK_MINUTES = 60;
 
 /**
  * A stored session (section 61), plus the three values the backend derives

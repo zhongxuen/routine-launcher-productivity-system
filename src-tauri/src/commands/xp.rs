@@ -7,18 +7,18 @@
 //! "award me XP" command for a bug — or a devtools console — to call. The
 //! frontend's job is to read where the user stands and to render it.
 //!
-//! The exception is [`complete_quest`], because a quest is finished by the
-//! user ticking it off rather than by anything the backend can observe. It is
-//! still guarded: once per quest per day, only on the day in question, and
-//! for what section 43 says the quest's band is worth rather than for
-//! whatever the caller asked to be paid.
+//! The exception is [`complete_quest`], which the checklist calls when it
+//! sees a quest finished. The caller only names the quest: Rust decides
+//! whether it is one of today's, re-counts its requirement from the database,
+//! and pays once per quest per day for what section 43 says the quest's band
+//! is worth (section 88).
 
 use tauri::State;
 
 use crate::db::DbConnection;
+use crate::services::quests::{self, DailyQuest};
 use crate::services::xp::{
-    self, Achievement, CompletedQuest, LevelProgress, Progress, QuestCompletion, StreakProgress,
-    XpTransaction,
+    self, Achievement, LevelProgress, Progress, QuestCompletion, StreakProgress, XpTransaction,
 };
 
 // ---------------------------------------------------------------------------
@@ -69,6 +69,18 @@ pub fn list_achievements(db: State<DbConnection>) -> Result<Vec<Achievement>, St
 // Quests (sections 44, 62)
 // ---------------------------------------------------------------------------
 
+/// The day's quests, at the daily quest count Settings holds, each with the
+/// day's counts against its requirements. The checklist draws these; the
+/// definitions and the counting are `services::quests`, and nowhere else.
+#[tauri::command]
+pub fn get_daily_quests(
+    db: State<DbConnection>,
+    date_key: String,
+) -> Result<Vec<DailyQuest>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    quests::daily_quests(&conn, &date_key).map_err(|e| e.to_string())
+}
+
 /// The quests already paid for on a local date.
 ///
 /// The frontend re-counts the day on every load, so it keeps concluding that
@@ -88,13 +100,14 @@ pub fn list_quest_completions(
 /// Idempotent per quest per day: a second call — from a later load, or from
 /// another window that reached the same conclusion at the same moment —
 /// answers with the completion the first one recorded and grants nothing
-/// more. Rejects a quest dated to any day but today.
+/// more. Rejects a quest dated to any day but today, one the day does not
+/// offer, and one whose requirement the database says is not met yet.
 #[tauri::command]
 pub fn complete_quest(
     db: State<DbConnection>,
-    quest: CompletedQuest,
+    quest_id: String,
     date_key: String,
 ) -> Result<QuestCompletion, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
-    xp::complete_quest(&conn, quest, &date_key).map_err(|e| e.to_string())
+    xp::complete_quest(&conn, &quest_id, &date_key).map_err(|e| e.to_string())
 }

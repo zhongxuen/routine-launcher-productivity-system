@@ -1,15 +1,10 @@
-import { Check, CircleCheck, CirclePause } from "lucide-react";
+import { Check, CircleCheck, CirclePause, Coffee } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  FOCUS_OUTCOME_LABELS,
-  formatFocusLength,
-  formatTargetLength,
-  sessionOutcome,
-} from "@/lib/focus-utils";
+import { FOCUS_OUTCOME_LABELS, formatFocusLength, sessionOutcome } from "@/lib/focus-utils";
 import { formatTimestampTime } from "@/lib/task-utils";
 import { cn } from "@/lib/utils";
 import { useTaskStore } from "@/stores/taskStore";
@@ -19,8 +14,12 @@ import FocusAttachment from "./FocusAttachment";
 
 interface FocusCompletionProps {
   session: FocusSession;
-  /** The break the preset that just ran suggests, if it named one. */
+  /**
+   * The break this session has earned, or null — it did not complete, or its
+   * preset names none. See `breakOffer` in `focusStore`.
+   */
   breakMinutes: number | null;
+  onStartBreak: () => void;
   onStartAnother: () => void;
   onDismiss: () => void;
 }
@@ -42,10 +41,16 @@ interface FocusCompletionProps {
  * describes, where the timer finishing is followed by the task being ticked
  * off. Offering it here means the user does not have to go and find the row
  * they have just spent 43 minutes on.
+ *
+ * And a completed session whose preset names a break offers that break first
+ * (section 34's 5 of 25/5). First because it is the preset's own next step,
+ * not because it is required — "Start another session" beside it is how the
+ * break is skipped.
  */
 function FocusCompletion({
   session,
   breakMinutes,
+  onStartBreak,
   onStartAnother,
   onDismiss,
 }: FocusCompletionProps) {
@@ -85,18 +90,20 @@ function FocusCompletion({
           </p>
         )}
 
-        {completed && breakMinutes !== null && (
-          <p className="text-sm text-muted-foreground">
-            Take a {formatTargetLength(breakMinutes)} break.
-          </p>
-        )}
-
         {session.task_id !== null && (
           <CompleteTask taskId={session.task_id} />
         )}
 
         <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-          <Button onClick={onStartAnother}>Start another session</Button>
+          {breakMinutes !== null && (
+            <Button onClick={onStartBreak}>
+              <Coffee />
+              Start {breakMinutes}-minute break
+            </Button>
+          )}
+          <Button variant={breakMinutes !== null ? "outline" : "default"} onClick={onStartAnother}>
+            Start another session
+          </Button>
           <Button variant="outline" onClick={onDismiss}>
             Done
           </Button>

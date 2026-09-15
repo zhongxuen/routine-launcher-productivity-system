@@ -44,6 +44,8 @@ export type SoundEffect =
   | "task-complete"
   /** A focus session reaching the end of its length (section 20). */
   | "focus-complete"
+  /** The break after a session running out (section 34). */
+  | "break-over"
   /** A routine finishing its action list (section 32). */
   | "routine-complete"
   /** A routine finishing with at least one action that failed (section 87). */
@@ -74,6 +76,11 @@ const VOICINGS: Record<SoundEffect, Voicing> = {
   // arrive when the user has looked away from the screen, which is the one
   // case in this app where a sound is doing real work rather than decorating.
   "focus-complete": { notes: [660, 880, 1320], noteSeconds: 0.11, gain: 0.07, type: "sine" },
+
+  // The same job — the user is, by design, away from the screen — so the same
+  // weight, but a different figure: two notes a fourth apart, softer-edged,
+  // so "back to work" is not mistaken for "done" by someone not looking.
+  "break-over": { notes: [587.33, 783.99], noteSeconds: 0.14, gain: 0.07, type: "triangle" },
 
   "routine-complete": { notes: [587.33, 880], noteSeconds: 0.08, gain: 0.05, type: "triangle" },
 

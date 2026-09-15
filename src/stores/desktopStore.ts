@@ -41,6 +41,7 @@
 
 import { create } from "zustand";
 
+import { emitProgressChanged } from "@/lib/progress-events";
 import {
   chooseDestinationFolder,
   deleteDesktopItems,
@@ -265,6 +266,9 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
 
       const report = await moveDesktopItems(paths, destination);
       set({ report, pendingAction: null, isActing: false });
+      // The move was recorded as a cleanup action, which can unlock
+      // Organized. See `src/lib/progress-events.ts`.
+      emitProgressChanged();
       await get().runScan();
     } catch (error) {
       set({
@@ -292,6 +296,7 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
     try {
       const report = await deleteDesktopItems(paths);
       set({ report, pendingAction: null, isActing: false });
+      emitProgressChanged();
       await get().runScan();
     } catch (error) {
       set({

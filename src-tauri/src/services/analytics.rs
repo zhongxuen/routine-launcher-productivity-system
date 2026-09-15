@@ -47,6 +47,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
 
 use super::error::ServiceResult;
+use super::settings::{self, WeekStart};
 use super::tasks::owed_by_predicate;
 use super::xp::{self, StreakProgress};
 
@@ -56,18 +57,6 @@ use super::xp::{self, StreakProgress};
 /// the last one. Long enough to show a streak taking hold and short enough
 /// that the grid stays readable at the size a tab panel gives it.
 const HISTORY_DAYS: i64 = 28;
-
-/// The first day of the week containing today, as local `YYYY-MM-DD`.
-///
-/// Weeks start on Monday, which is what section 36's "Most productive day:
-/// Wednesday" and section 82's "Best day" are counted within.
-///
-/// `'-6 days'` then `'weekday 1'` is the SQLite idiom for "the most recent
-/// Monday, today included": stepping back six days lands somewhere in the
-/// previous seven, and `weekday 1` then moves forward to the first Monday at
-/// or after that — which is this week's. Asking for `weekday 1` on its own
-/// would answer with *next* Monday whenever today is not one.
-const WEEK_START: &str = "date('now', 'localtime', '-6 days', 'weekday 1')";
 
 // ---------------------------------------------------------------------------
 // Payloads
@@ -122,7 +111,7 @@ pub struct PeriodStats {
     /// First local day of the window, `YYYY-MM-DD`.
     pub start: String,
     /// Last local day of the window, inclusive. Equal to `start` for TODAY,
-    /// and Sunday for THIS WEEK — which may be in the future.
+    /// and the week's last day for THIS WEEK — which may be in the future.
     pub end: String,
     pub focus_seconds: i64,
     pub focus_sessions: i64,
@@ -158,7 +147,8 @@ pub struct ProductivityStats {
     pub today_date: String,
     pub today: PeriodStats,
     pub week: PeriodStats,
-    /// Monday to Sunday of the current week, always seven entries, including
+    /// The seven days of the current week, from the week start in section
+    /// 52's Daily Settings (Monday unless the user chose Sunday), including
     /// days still to come — which read as zeroes rather than being left out,
     /// so the week's bars keep their shape as it fills in.
     pub week_days: Vec<DayStats>,
@@ -175,11 +165,7 @@ pub struct ProductivityStats {
     pub streak_history: Vec<DayStats>,
 }
 
-/// Section 33's five figures for one routine.
-///
-/// Three of them — focus time, average session and tasks completed — are what
-/// Stage 2 left as a TODO because nothing wrote `focus_sessions` or set
-/// `tasks.routine_id` yet. Both are written now, so all five are measured.
+/// Section 33's five figures for one routine, all of them measured.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutineStatistics {
@@ -209,8 +195,13 @@ pub struct RoutineStatistics {
 /// productive day should show that day already counted rather than waiting
 /// for the first completion of the new one.
 pub fn productivity_stats(conn: &Connection) -> ServiceResult<ProductivityStats> {
-    let window = Window::current(conn)?;
+    let window = Window::current(conn, settings::week_start(conn)?)?;
+    stats_for(conn, &window)
+}
 
+/// [`productivity_stats`] for a given window, which is what lets the tests
+/// pin the date.
+fn stats_for(conn: &Connection, window: &Window) -> ServiceResult<ProductivityStats> {
     // One pass over the widest range anyone here asks about — the history
     // starts before the week does, and the week can end after today — then
     // sliced. The alternative is three date-bucketed queries that could each
@@ -246,8 +237,11 @@ pub fn productivity_stats(conn: &Connection) -> ServiceResult<ProductivityStats>
     })
 }
 
-/// The local dates every panel is measured against, read in one statement so
-/// they cannot disagree about which day it is.
+/// The local dates every panel is measured against.
+///
+/// The clock is read once, for today's date, and every other date is worked
+/// out from that string rather than from `'now'` again — so the panels cannot
+/// disagree about which day it is, even on a read that straddles midnight.
 #[derive(Debug, Clone)]
 struct Window {
     today: String,
@@ -257,23 +251,37 @@ struct Window {
 }
 
 impl Window {
-    fn current(conn: &Connection) -> ServiceResult<Self> {
-        let sql = format!(
-            "SELECT date('now', 'localtime') AS today, \
-                    {WEEK_START} AS week_start, \
-                    date({WEEK_START}, '+6 days') AS week_end, \
-                    date('now', 'localtime', ?1) AS history_start"
-        );
+    fn current(conn: &Connection, week_start: WeekStart) -> ServiceResult<Self> {
+        let today: String =
+            conn.query_row("SELECT date('now', 'localtime')", [], |row| row.get(0))?;
+        Self::on(conn, &today, week_start)
+    }
+
+    /// The window around the local date `today`.
+    ///
+    /// The week is the seven days starting on the most recent `week_start`
+    /// day, today included. `'-6 days'` then `'weekday N'` is the SQLite idiom
+    /// for that: stepping back six days lands somewhere in the previous seven,
+    /// and `weekday N` then moves forward to the first such day at or after it
+    /// — which is this week's. Asking for `weekday N` on its own would answer
+    /// with *next* week's whenever today is not that day.
+    fn on(conn: &Connection, today: &str, week_start: WeekStart) -> ServiceResult<Self> {
         let back = format!("-{} days", HISTORY_DAYS - 1);
 
-        Ok(conn.query_row(&sql, params![back], |row| {
-            Ok(Self {
-                today: row.get("today")?,
-                week_start: row.get("week_start")?,
-                week_end: row.get("week_end")?,
-                history_start: row.get("history_start")?,
-            })
-        })?)
+        Ok(conn.query_row(
+            "SELECT date(?1, '-6 days', ?2) AS week_start,
+                    date(?1, '-6 days', ?2, '+6 days') AS week_end,
+                    date(?1, ?3) AS history_start",
+            params![today, week_start.sqlite_modifier(), back],
+            |row| {
+                Ok(Self {
+                    today: today.to_owned(),
+                    week_start: row.get("week_start")?,
+                    week_end: row.get("week_end")?,
+                    history_start: row.get("history_start")?,
+                })
+            },
+        )?)
     }
 }
 
@@ -615,9 +623,9 @@ mod tests {
         let stats = productivity_stats(&conn).unwrap();
         assert_eq!(stats.today.focus_seconds, 0);
 
-        // Only true when yesterday is in the same Monday-to-Sunday week,
-        // which is every day but Monday — so the assertion is conditional on
-        // the week having room for it rather than on the day of the run.
+        // Only true when yesterday is in the same week, which is every day
+        // but the week's first — so the assertion is conditional on the week
+        // having room for it rather than on the day of the run.
         if stats.week.start < stats.today_date {
             assert_eq!(stats.week.focus_seconds, 30 * 60);
         }
@@ -765,6 +773,113 @@ mod tests {
         assert!(stats.today_date <= stats.week.end);
         assert_eq!(stats.week_days.first().unwrap().date, stats.week.start);
         assert_eq!(stats.week_days.last().unwrap().date, stats.week.end);
+    }
+
+    /// The weekday SQLite gives a `YYYY-MM-DD`: `"0"` is Sunday.
+    fn weekday_of(conn: &Connection, date: &str) -> String {
+        conn.query_row("SELECT strftime('%w', ?1)", params![date], |row| row.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_sunday_start_week_runs_sunday_to_saturday_and_contains_today() {
+        let conn = conn();
+        settings::set_daily_settings(
+            &conn,
+            settings::DailySettings {
+                week_start: WeekStart::Sunday,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let stats = productivity_stats(&conn).unwrap();
+
+        assert_eq!(weekday_of(&conn, &stats.week.start), "0", "starts on a Sunday");
+        assert_eq!(weekday_of(&conn, &stats.week.end), "6", "ends on a Saturday");
+        assert!(stats.week.start <= stats.today_date);
+        assert!(stats.today_date <= stats.week.end);
+        assert_eq!(stats.week_days.len(), 7);
+        assert_eq!(stats.week_days.first().unwrap().date, stats.week.start);
+        assert_eq!(stats.week_days.last().unwrap().date, stats.week.end);
+    }
+
+    #[test]
+    fn the_week_is_found_from_either_start_day_on_any_day() {
+        let conn = conn();
+        let week = |today: &str, start: WeekStart| {
+            let window = Window::on(&conn, today, start).unwrap();
+            (window.week_start, window.week_end)
+        };
+        let dates = |start: &str, end: &str| (start.to_owned(), end.to_owned());
+
+        // 2026-09-13 is a Sunday, 2026-09-14 a Monday, 2026-09-19 a Saturday.
+        // Mid-week, a Sunday week starts the day before the Monday one.
+        assert_eq!(week("2026-09-16", WeekStart::Monday), dates("2026-09-14", "2026-09-20"));
+        assert_eq!(week("2026-09-16", WeekStart::Sunday), dates("2026-09-13", "2026-09-19"));
+
+        // On a Sunday: the last day of a Monday week, the first of a Sunday one.
+        assert_eq!(week("2026-09-13", WeekStart::Monday), dates("2026-09-07", "2026-09-13"));
+        assert_eq!(week("2026-09-13", WeekStart::Sunday), dates("2026-09-13", "2026-09-19"));
+
+        // On a Monday: the first day of a Monday week, the second of a Sunday one.
+        assert_eq!(week("2026-09-14", WeekStart::Monday), dates("2026-09-14", "2026-09-20"));
+        assert_eq!(week("2026-09-14", WeekStart::Sunday), dates("2026-09-13", "2026-09-19"));
+
+        // On a Saturday: the last day of a Sunday week.
+        assert_eq!(week("2026-09-19", WeekStart::Sunday), dates("2026-09-13", "2026-09-19"));
+
+        // Across a month and a year end.
+        assert_eq!(week("2026-10-01", WeekStart::Sunday), dates("2026-09-27", "2026-10-03"));
+        assert_eq!(week("2027-01-01", WeekStart::Monday), dates("2026-12-28", "2027-01-03"));
+    }
+
+    #[test]
+    fn work_on_the_sunday_counts_in_a_sunday_week_and_not_a_monday_one() {
+        let conn = conn();
+        let coding = a_routine(&conn, "Coding");
+
+        // Local noon on Sunday 2026-09-13, as the UTC the database stores.
+        let sunday_noon = "datetime('2026-09-13 12:00:00', 'utc')";
+        conn.execute(
+            &format!(
+                "INSERT INTO focus_sessions (started_at, ended_at, duration_seconds, completed)
+                 VALUES ({sunday_noon}, {sunday_noon}, 1800, 1)"
+            ),
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            &format!(
+                "INSERT INTO routine_launches (routine_id, launched_at) VALUES (?1, {sunday_noon})"
+            ),
+            params![coding],
+        )
+        .unwrap();
+
+        let on_wednesday = |start| {
+            let window = Window::on(&conn, "2026-09-16", start).unwrap();
+            stats_for(&conn, &window).unwrap()
+        };
+        let monday_week = on_wednesday(WeekStart::Monday);
+        let sunday_week = on_wednesday(WeekStart::Sunday);
+
+        assert_eq!(monday_week.week.focus_seconds, 0);
+        assert_eq!(monday_week.week.routine_launches, 0);
+        assert!(monday_week.routine_usage.is_empty());
+        assert_eq!(monday_week.most_productive_day, None);
+
+        assert_eq!(sunday_week.week.focus_seconds, 1800);
+        assert_eq!(sunday_week.week.routine_launches, 1);
+        assert_eq!(sunday_week.routine_usage[0].name, "Coding");
+        assert_eq!(sunday_week.week_days[0].date, "2026-09-13");
+        assert_eq!(
+            sunday_week.most_productive_day.map(|day| day.date).as_deref(),
+            Some("2026-09-13")
+        );
+
+        // The streak calendar is the last four weeks either way.
+        assert_eq!(monday_week.streak_history, sunday_week.streak_history);
     }
 
     // -----------------------------------------------------------------------

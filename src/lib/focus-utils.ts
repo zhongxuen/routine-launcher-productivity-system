@@ -12,8 +12,8 @@
  * rather than one every caller makes differently.
  */
 
-import type { ActiveFocusSession } from "@/types/focus-ui";
-import type { FocusSession } from "@/types/focus";
+import type { ActiveFocusSession, FocusBreak } from "@/types/focus-ui";
+import { focusPreset, type FocusPresetId, type FocusSession } from "@/types/focus";
 
 /* -------------------------------------------------------------------------- */
 /* Timestamps                                                                 */
@@ -115,6 +115,51 @@ export function progressPercent(session: ActiveFocusSession): number {
  */
 export function hasReachedTarget(session: ActiveFocusSession): boolean {
   return session.targetSeconds !== null && session.elapsedSeconds >= session.targetSeconds;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Breaks                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The break a preset is followed by, in minutes, or null for none: the
+ * preset's own (the 5 of 25/5), else — for Custom — the break field beside
+ * its length, where zero means none. A stopwatch never has one.
+ */
+export function breakMinutesFor(
+  presetId: FocusPresetId,
+  customBreakMinutes: number,
+): number | null {
+  const preset = focusPreset(presetId);
+  if (preset.breakMinutes !== null) return preset.breakMinutes;
+  return presetId === "custom" && customBreakMinutes > 0 ? customBreakMinutes : null;
+}
+
+/**
+ * Whole seconds left in a break, rounded up so the face reads `5:00` for the
+ * first second and `0:00` only once it is actually over. Measured against
+ * `endsAtMs` for the reason a session is measured against `startedAtMs`: the
+ * interval decides how often the number is refreshed, never what it says.
+ */
+export function breakRemainingSeconds(focusBreak: FocusBreak, now: number = Date.now()): number {
+  return Math.max(0, Math.ceil((focusBreak.endsAtMs - now) / 1000));
+}
+
+/** How far through a break, 0-100. */
+export function breakProgressPercent(focusBreak: FocusBreak): number {
+  const total = focusBreak.minutes * 60;
+  if (total <= 0) return 100;
+  const fraction = (total - focusBreak.remainingSeconds) / total;
+  return Math.min(100, Math.max(0, Math.round(fraction * 100)));
+}
+
+/**
+ * What the session after a break is for — the task, else the routine — or
+ * null when it stands alone. The name the "break over" notification and the
+ * widget's heading use.
+ */
+export function breakBackTo(focusBreak: FocusBreak): string | null {
+  return focusBreak.next.taskTitle ?? focusBreak.next.label ?? focusBreak.next.routineName ?? null;
 }
 
 /* -------------------------------------------------------------------------- */

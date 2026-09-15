@@ -225,6 +225,29 @@ export interface TaskUpdate {
   recurrence?: NewTaskRecurrence | null;
 }
 
+/**
+ * A repeating task that a future day will get but does not have yet: one row
+ * of the read-only Repeats group when Tasks > Today is looking at tomorrow
+ * (development-plan.md section 53).
+ *
+ * Not a {@link Task}, because none exists yet. `ensureRecurringTasks` only
+ * creates today's instance, so tomorrow's is created on the day. The fields
+ * are what that instance will be cloned with, taken from the series' most
+ * recent task, and there is no id, status or checkbox, because there is
+ * nothing to tick.
+ */
+export interface RepeatPreview {
+  /** Look it up in the store's `recurrences` map to label the schedule. */
+  recurrence_id: number;
+  title: string;
+  priority: TaskPriority;
+  category_id: number | null;
+  /** 24-hour `HH:MM`, carried over from the series. */
+  due_time: string | null;
+  estimated_minutes: number | null;
+  routine_id: number | null;
+}
+
 /** Filters for `listTasks`. Every field combines with AND. */
 export interface TaskFilter {
   /** Date-based view. Defaults to `"all"`. */

@@ -6,6 +6,7 @@
  * drawn and its data read in Rust, but nothing it offers is *done* there:
  *
  * ```text
+ * ☀️ Start My Day ─▶ appStore.requestStartMyDay (§21's dialog, on the dashboard)
  * 🚀 Coding      ─▶ routineStore.launchRoutine  (§32's checklist panel)
  * ⏱ Start Focus  ─▶ startFocusFor               (§19's clock, on the picked preset)
  * + Add Task     ─▶ taskStore.openQuickAdd      (§16's dialog)
@@ -26,9 +27,10 @@
  * something to look at.
  *
  * Each handler navigates *first*. The panel a launch draws is mounted by the
- * dashboard, the clock by the Focus page, the quick-add dialog by Tasks — so
- * a menu item that acted without moving the user would be a menu item that
- * appeared to do nothing from the wrong page.
+ * dashboard and the clock by the Focus page — so a menu item that acted
+ * without moving the user would be a menu item that appeared to do nothing
+ * from the wrong page. Quick-add is mounted by the shell and would open on any
+ * page; Add Task still goes to Today so the task is seen to land.
  */
 
 import { useEffect } from "react";
@@ -37,10 +39,11 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import { FOCUS_TIMER_PATH, startFocusFor } from "@/hooks/useStartFocus";
 import { onTrayAction, type TrayAction } from "@/services/trayService";
+import { useAppStore } from "@/stores/appStore";
 import { useRoutineStore } from "@/stores/routineStore";
 import { useTaskStore } from "@/stores/taskStore";
 
-/** Where the quick-add dialog is mounted, and the day it defaults to. */
+/** The list quick-add's default due date puts a new task in. */
 const TASKS_TODAY_PATH = "/tasks/today";
 
 const DASHBOARD_PATH = "/";
@@ -104,6 +107,14 @@ async function runTrayAction(
       }
 
       await useRoutineStore.getState().launchRoutine(action.routine_id);
+      return;
+    }
+
+    case "start-my-day": {
+      // The dashboard mounts the dialog, and the launch panel it hands over
+      // to, so that is where it opens.
+      navigate(DASHBOARD_PATH);
+      useAppStore.getState().requestStartMyDay();
       return;
     }
 

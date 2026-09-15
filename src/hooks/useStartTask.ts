@@ -69,12 +69,14 @@ export function startTaskNow(task: Task): void {
   }
 
   void launchRoutine(routine.id, {
-    taskId: task.id,
-    title: task.title,
-    focusMinutes: focusMinutesFor(
-      task.estimated_minutes,
-      routineTimerMinutes(routine.actions),
-    ),
+    task: {
+      taskId: task.id,
+      title: task.title,
+      focusMinutes: focusMinutesFor(
+        task.estimated_minutes,
+        routineTimerMinutes(routine.actions),
+      ),
+    },
   });
 }
 

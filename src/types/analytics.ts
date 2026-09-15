@@ -59,8 +59,8 @@ export interface PeriodStats {
   /** First local day of the window, `YYYY-MM-DD`. */
   start: string;
   /**
-   * Last local day, inclusive. Equal to `start` for TODAY; Sunday for THIS
-   * WEEK, which is usually still in the future.
+   * Last local day, inclusive. Equal to `start` for TODAY; the week's last
+   * day for THIS WEEK, which is usually still in the future.
    */
   end: string;
   focusSeconds: number;
@@ -86,9 +86,9 @@ export interface ProductivityStats {
   today: PeriodStats;
   week: PeriodStats;
   /**
-   * Monday to Sunday of the current week — always seven entries, days still
-   * to come included as zeroes so the bars keep their shape as the week
-   * fills in.
+   * The current week, from the week start chosen in Settings (Monday or
+   * Sunday, section 52) — always seven entries, days still to come included
+   * as zeroes so the bars keep their shape as the week fills in.
    */
   weekDays: DayStats[];
   /**

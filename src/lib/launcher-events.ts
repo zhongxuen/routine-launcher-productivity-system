@@ -31,7 +31,14 @@ import { WEBVIEW_ID } from "./window-sync";
 
 const START_FOCUS_EVENT = "launcher://start-focus";
 
-interface StartFocusRequest {
+/**
+ * Section 21's Start My Day, asked for the same way and for the same reason:
+ * its dialog, the launch panel it hands over to and the planning session's
+ * clock are all the main window's.
+ */
+const START_MY_DAY_EVENT = "launcher://start-my-day";
+
+interface LauncherRequest {
   /** Which webview asked, so nobody answers their own request. */
   source: string;
 }
@@ -44,7 +51,7 @@ interface StartFocusRequest {
  * except keep an overlay on screen over an app that is not listening.
  */
 export function requestFocusSession(): void {
-  const payload: StartFocusRequest = { source: WEBVIEW_ID };
+  const payload: LauncherRequest = { source: WEBVIEW_ID };
 
   void emit(START_FOCUS_EVENT, payload).catch((cause) => {
     console.error("Could not ask the app for a focus session:", cause);
@@ -56,7 +63,24 @@ export function requestFocusSession(): void {
  * unsubscribe function, so it can be returned straight out of a `useEffect`.
  */
 export async function onFocusSessionRequested(handler: () => void): Promise<UnlistenFn> {
-  return listen<StartFocusRequest>(START_FOCUS_EVENT, (event) => {
+  return listen<LauncherRequest>(START_FOCUS_EVENT, (event) => {
+    if (event.payload.source === WEBVIEW_ID) return;
+    handler();
+  });
+}
+
+/** Asks the main window to open Start My Day. Fire-and-forget, as above. */
+export function requestStartMyDay(): void {
+  const payload: LauncherRequest = { source: WEBVIEW_ID };
+
+  void emit(START_MY_DAY_EVENT, payload).catch((cause) => {
+    console.error("Could not ask the app to open Start My Day:", cause);
+  });
+}
+
+/** Subscribes to Start My Day requested from *another* window. */
+export async function onStartMyDayRequested(handler: () => void): Promise<UnlistenFn> {
+  return listen<LauncherRequest>(START_MY_DAY_EVENT, (event) => {
     if (event.payload.source === WEBVIEW_ID) return;
     handler();
   });

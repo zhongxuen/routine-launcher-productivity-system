@@ -15,6 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   NewTask,
   NewTaskCategory,
+  RepeatPreview,
   Task,
   TaskCategory,
   TaskCategoryUpdate,
@@ -79,6 +80,31 @@ export async function listTasks(filter: TaskFilter = {}): Promise<Task[]> {
  */
 export async function listTodayTasks(filter: ViewFilter = {}): Promise<Task[]> {
   return listTasks({ ...filter, view: "today" });
+}
+
+/**
+ * One day's tasks: those due on `date` (`YYYY-MM-DD`), for section 53's
+ * Yesterday / Tomorrow on Tasks > Today.
+ *
+ * Unlike {@link listTodayTasks}, nothing is carried over from earlier days:
+ * this lists what was due on that day, not what is still owed. Pass
+ * `statuses` to narrow it the way `TaskFilter.statuses` does.
+ */
+export async function listTasksForDate(
+  date: string,
+  statuses?: TaskStatus[],
+): Promise<Task[]> {
+  return invoke<Task[]>("list_tasks_for_date", { date, statuses });
+}
+
+/**
+ * The repeating tasks a future `date` will get that have not been created
+ * yet: the read-only Repeats group. Writes nothing (the instances are still
+ * only created on their own day by {@link ensureRecurringTasks}), and returns
+ * an empty list for today and earlier.
+ */
+export async function listRepeatsForDate(date: string): Promise<RepeatPreview[]> {
+  return invoke<RepeatPreview[]>("list_repeats_for_date", { date });
 }
 
 /**

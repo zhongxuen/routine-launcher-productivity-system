@@ -29,9 +29,10 @@ import WidgetHeading from "./WidgetHeading";
  */
 function WidgetFocusMode() {
   const session = useFocusStore((state) => state.session);
+  const focusBreak = useFocusStore((state) => state.focusBreak);
   const presetId = useFocusStore((state) => state.presetId);
 
-  const label = focusLabel(session, presetId);
+  const label = focusLabel(session, presetId, focusBreak);
 
   return (
     <div className="flex h-full flex-col gap-1">

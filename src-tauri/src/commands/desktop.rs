@@ -22,12 +22,18 @@
 //! shortcuts", because there is no point in the product where the app, rather
 //! than the user, gets to decide that — and so no quest, schedule or tray item
 //! has anything to call.
+//!
+//! The two that change something also leave a row in `cleanup_actions` once
+//! at least one item was handled, for the cleanup quest and the Organized
+//! achievement to count. The row is written after the items have been
+//! handled, never before, and holds no path.
 
 use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager, State};
 
 use crate::db::DbConnection;
+use crate::services::cleanup_actions::{self, CleanupAction, CleanupUtility};
 use crate::services::desktop::{self, ActionReport, DesktopRoot, DesktopRootKind, DesktopScan};
 use crate::services::screenshots::{now_epoch, LocalClock};
 
@@ -62,11 +68,19 @@ pub fn scan_desktop(app: AppHandle, db: State<DbConnection>) -> Result<DesktopSc
 #[tauri::command]
 pub fn move_desktop_items(
     app: AppHandle,
+    db: State<DbConnection>,
     paths: Vec<String>,
     destination: String,
 ) -> Result<ActionReport, String> {
-    desktop::move_items(&desktop_roots(&app), &paths, &destination)
-        .map_err(|error| error.to_string())
+    let report = desktop::move_items(&desktop_roots(&app), &paths, &destination)
+        .map_err(|error| error.to_string())?;
+    cleanup_actions::note(
+        &db,
+        CleanupUtility::Desktop,
+        CleanupAction::Move,
+        report.succeeded,
+    );
+    Ok(report)
 }
 
 /// Deletes the items the user selected, permanently.
@@ -77,8 +91,20 @@ pub fn move_desktop_items(
 /// rather than treated as "all of them". Folders and anything on the public
 /// desktop are refused there too, whatever the frontend sends.
 #[tauri::command]
-pub fn delete_desktop_items(app: AppHandle, paths: Vec<String>) -> Result<ActionReport, String> {
-    desktop::delete_items(&desktop_roots(&app), &paths).map_err(|error| error.to_string())
+pub fn delete_desktop_items(
+    app: AppHandle,
+    db: State<DbConnection>,
+    paths: Vec<String>,
+) -> Result<ActionReport, String> {
+    let report =
+        desktop::delete_items(&desktop_roots(&app), &paths).map_err(|error| error.to_string())?;
+    cleanup_actions::note(
+        &db,
+        CleanupUtility::Desktop,
+        CleanupAction::Delete,
+        report.succeeded,
+    );
+    Ok(report)
 }
 
 /// Opens one item with whatever the OS opens it with.

@@ -40,6 +40,7 @@
 
 import { create } from "zustand";
 
+import { emitProgressChanged } from "@/lib/progress-events";
 import {
   chooseDestinationFolder,
   deleteDownloadsFiles,
@@ -243,6 +244,9 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
 
       const report = await moveDownloadsFiles(paths, destination);
       set({ report, pendingAction: null, isActing: false });
+      // The move was recorded as a cleanup action, which can unlock
+      // Organized. See `src/lib/progress-events.ts`.
+      emitProgressChanged();
       await get().runScan();
     } catch (error) {
       set({
@@ -270,6 +274,7 @@ export const useDownloadsStore = create<DownloadsState>((set, get) => ({
     try {
       const report = await deleteDownloadsFiles(paths);
       set({ report, pendingAction: null, isActing: false });
+      emitProgressChanged();
       await get().runScan();
     } catch (error) {
       set({

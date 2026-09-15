@@ -22,6 +22,11 @@
 //! command, deliberately: section 67's sequence is scan -> show -> select ->
 //! confirm -> act, and a "delete all of these" entry point would be a way
 //! around the third and fourth steps.
+//!
+//! Move, Archive and Delete each leave a row in `cleanup_actions` when the
+//! file was handled, for the cleanup quest and the Organized achievement.
+//! The row is written afterwards, with the lock taken only then, and holds no
+//! path.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -29,6 +34,7 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
 
 use crate::db::DbConnection;
+use crate::services::cleanup_actions::{self, CleanupAction, CleanupUtility};
 use crate::services::large_files::{
     self, FileActionResult, LargeFilePreferences, LargeFileScan,
 };
@@ -148,8 +154,15 @@ pub fn open_large_file(path: String) -> Result<(), String> {
 /// Never overwrites: a name already taken at the destination gets a `" (1)"`
 /// suffix, and the result says so.
 #[tauri::command]
-pub fn move_large_file(path: String, destination: String) -> Result<FileActionResult, String> {
-    large_files::move_to(Path::new(&path), Path::new(&destination)).map_err(|e| e.to_string())
+pub fn move_large_file(
+    db: State<DbConnection>,
+    path: String,
+    destination: String,
+) -> Result<FileActionResult, String> {
+    let result = large_files::move_to(Path::new(&path), Path::new(&destination))
+        .map_err(|e| e.to_string())?;
+    cleanup_actions::note(&db, CleanupUtility::LargeFiles, CleanupAction::Move, 1);
+    Ok(result)
 }
 
 /// Moves one file into the archive folder, under `YYYY-MM` for the month it
@@ -166,7 +179,10 @@ pub fn archive_large_file(
     modified_ms: Option<i64>,
 ) -> Result<FileActionResult, String> {
     let root = archive_root(&app, &db)?;
-    large_files::archive(Path::new(&path), &root, modified_ms).map_err(|e| e.to_string())
+    let result =
+        large_files::archive(Path::new(&path), &root, modified_ms).map_err(|e| e.to_string())?;
+    cleanup_actions::note(&db, CleanupUtility::LargeFiles, CleanupAction::Archive, 1);
+    Ok(result)
 }
 
 /// Sends one file to the Recycle Bin. Confirmed in the UI first.
@@ -174,8 +190,13 @@ pub fn archive_large_file(
 /// The Recycle Bin rather than an unlink, so the confirmation can promise the
 /// file is recoverable and mean it. See `services::large_files::delete`.
 #[tauri::command]
-pub fn delete_large_file(path: String) -> Result<FileActionResult, String> {
-    large_files::delete(Path::new(&path)).map_err(|e| e.to_string())
+pub fn delete_large_file(
+    db: State<DbConnection>,
+    path: String,
+) -> Result<FileActionResult, String> {
+    let result = large_files::delete(Path::new(&path)).map_err(|e| e.to_string())?;
+    cleanup_actions::note(&db, CleanupUtility::LargeFiles, CleanupAction::Delete, 1);
+    Ok(result)
 }
 
 /// Hides a file from future scans, answering with the ignore list as it now

@@ -33,6 +33,31 @@ export interface RoutineTemplate {
   routine: NewRoutine;
 }
 
+/**
+ * Section 21's routine, and the template Start My Day offers when no
+ * start-of-day routine is set.
+ *
+ * Section 21's "Open task dashboard" has no action: Start My Day is pressed
+ * on the dashboard, so the dashboard is already open. Its "work applications"
+ * differ too much between people to guess at — the builder is where they are
+ * added. The timer is the planning session's ten minutes, so the routine says
+ * so when launched from its own card as well.
+ */
+export const START_MY_DAY_TEMPLATE: RoutineTemplate = {
+  id: "start-my-day",
+  summary: "Calendar and email, then 10 minutes to plan the day.",
+  routine: {
+    name: "Start My Day",
+    description: "Calendar and email open; the dashboard is already up.",
+    icon: "☀️",
+    actions: [
+      { type: "url", target: "https://calendar.google.com" },
+      { type: "url", target: "https://mail.google.com" },
+      { type: "timer", target: "10" },
+    ],
+  },
+};
+
 export const ROUTINE_TEMPLATES: RoutineTemplate[] = [
   {
     id: "coding-mode",
@@ -78,4 +103,5 @@ export const ROUTINE_TEMPLATES: RoutineTemplate[] = [
       ],
     },
   },
+  START_MY_DAY_TEMPLATE,
 ];

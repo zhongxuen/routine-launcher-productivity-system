@@ -42,6 +42,7 @@
 
 import { create } from "zustand";
 
+import { emitProgressChanged } from "@/lib/progress-events";
 import {
   chooseDestinationFolder,
   organizeScreenshots,
@@ -242,6 +243,9 @@ export const useScreenshotStore = create<ScreenshotState>((set, get) => ({
     try {
       const report = await organizeScreenshots(paths, destination, grouping);
       set({ report, isOrganizing: false, stage: "summary" });
+      // The organize was recorded as a cleanup action, which can unlock
+      // Organized. See `src/lib/progress-events.ts`.
+      emitProgressChanged();
     } catch (error) {
       set({ actionError: String(error), isOrganizing: false });
     }

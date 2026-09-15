@@ -755,6 +755,61 @@ Deferred to the phases that need them: the `app_usage` and
 - [x] Recurring tasks
 - [x] Task completion
 
+Settings opens on **Daily**, §52's nine Daily Settings, saved together with
+one Save button because they are checked together: the start and end of the
+day, the default focus length, task priority and reminder, the start- and
+end-of-day routines, the daily quest count and the day the week starts on.
+They live in the `settings` table under `daily.*` keys
+(`get_daily_settings` / `set_daily_settings`, `services/settings.rs`), and a
+key that was never written reads as its default (09:00, 18:00, 50 minutes,
+Normal, no reminder, no routines, 3 quests, Monday), so there is no migration.
+Rust validates every field and the card shows its refusal as it is. Eight
+have consumers: the Custom timer starts at the default focus length, + Add
+Task opens on the default priority, the edit dialog suggests the default
+reminder when a task is given its first due time (the Add task form has no due
+time for "minutes before" to count back from), the dashboard shows 2 or 3
+objectives, Statistics counts This Week from Monday or Sunday, Start My Day
+opens the start-of-day routine (see Phase 6), and Plan Today measures the
+time left against the day's start and end (below). The end-of-day routine is
+only stored so far, for End My Day, and the card says so.
+
+Categories are managed in Settings &rsaquo; Task categories: rename in place,
+recolour from a palette, add, and delete. The seven seeded ones (§13) are
+ordinary rows and change like any other. Deleting a category keeps its tasks —
+`tasks.category_id` is `ON DELETE SET NULL` — and the confirmation says how
+many tasks that is before it happens. The task forms' category select ends in
+"New category…", which creates the category and selects it in one step.
+
+Tasks &rsaquo; Today pages through days with §53's `< Today >` (previous day,
+next day, back to today). It is not a calendar. The day is kept in the URL
+(`/tasks/today?date=2026-09-16`), so a reload or Back keeps it, and with no
+date the view is today with its carry-over, as before. Another day lists only
+what was due on it. On a past day the header says that ticking a task off
+records it as completed now, since nothing is backdated. On a future day the
+repeating tasks it will get are shown as a read-only Repeats group. They are
+still created only on their own day.
+
+Today's page opens with **Plan Today** (§20, §51), a collapsible panel above
+the list (`src/components/tasks/PlanToday.tsx`) rather than a page of its own,
+since §54 does not want a project-management tool. It shows the date, the
+day's **top priorities** (up to three of today's tasks, starred from the
+**other tasks** beside them and put in order with up / down), the
+**estimated workload** (`estimated_minutes` over today's open tasks, the same
+sum as Start My Day's, with any task that has no estimate named rather than
+counted as zero) and the **available focus time** (from now, or from the
+day's start if it has not come yet, to the day's end in Settings &rsaquo;
+Daily). When the workload is bigger it says so in one quiet line ("About 1h
+20m more than the time left today"), and nothing is blocked or rescheduled.
+Focus already done today is not taken off the time left: it happened before
+now, so it is already outside that window. **Start My Day** opens Phase 6's
+dialog on the dashboard. The priorities are the only stored part, one row per
+pick in `daily_plans` (`database/migrations/0008_daily_plans.sql`) keyed by
+the local date, with `ON DELETE CASCADE` from `tasks`. `get_daily_plan` /
+`set_daily_plan` (`services/daily_plans.rs`) save the whole ordered list and
+refuse a fourth pick, a repeat or a task that does not exist. Picked tasks
+get a quiet "★ #1 today" in the list, and backups carry the table. The
+dashboard's Today's Tasks card links to the panel with **Plan today**.
+
 **Phase 3 — Routine System** ✅ complete
 
 - [x] Routine CRUD
@@ -780,11 +835,13 @@ commands, so the My Routines cards (§29), the builder with reorderable actions
 (§31), the launch panel with its per-action ✓ / ✗ list and Retry / Continue
 (§32) and the statistics block (§33) all read and write SQLite. Saving the
 builder replaces a routine's whole action list in list order, so what is on
-screen is the run order. The Templates tab (§64) ships three starter routines —
-Coding Mode, Study Mode, Work Mode — which are pre-filled `create_routine`
-payloads and nothing more: adding one produces an ordinary, editable routine,
-and it opens in the builder so the guessed targets can be checked before the
-first launch.
+screen is the run order. The Templates tab (§64) ships four starter routines —
+Coding Mode, Study Mode, Work Mode and Start My Day — which are pre-filled
+`create_routine` payloads and nothing more: adding one produces an ordinary,
+editable routine, and it opens in the builder so the guessed targets can be
+checked before the first launch. Start My Day (§21) is calendar and email
+URLs and a 10-minute timer; its "open the task dashboard" needs no action,
+because the dashboard is where it is started from.
 
 Of the five figures in §33, launches and last-used are real — the backend
 stamps them inside `launch_routine`, and the store re-reads the list after
@@ -858,7 +915,10 @@ is started.
 
 - [x] Pomodoro timer — 25/5, 50/10 and 90/15 run on screen and are written to
       `focus_sessions`
-- [x] Custom timer — any length from 1 minute to 12 hours, plus Stopwatch
+- [x] Custom timer — any length from 1 minute to 12 hours, plus Stopwatch.
+      It starts at the default focus length from Settings &rsaquo; Daily
+      (50 minutes unless changed) and follows that setting until the length
+      is edited
 - [x] Focus history — Focus > History reads `list_focus_sessions` back
       newest-first, ended sessions only
 - [x] Task association — sessions store, label and are titled by their
@@ -870,6 +930,13 @@ is started.
 - [x] Task ↔ focus integration (§19) — Start Focus on a task, actual focus
       time recorded back onto it, and START TASK's routine handing over to a
       running clock
+- [x] Timed breaks (§34) — a completed 25/5, 50/10 or 90/15 session offers
+      "Start N-minute break"; the break counts down in `focusStore`, shows in
+      every window (the widget draws `Break · 4:12` in its own colour), and
+      ends with a native notification, the break sound if sound is on, and
+      "Start another session" with the same preset, task and routine. Skip
+      and End early are always there. Custom can carry an optional break,
+      set beside its length. A break is never written anywhere
 
 The session backend is in (§34–35, §61). `focus_sessions` records what
 actually happened; the clock that produces it runs in the frontend, because a
@@ -928,6 +995,17 @@ that has never rendered a clock), a throttled background window, and the
 machine sleeping. Paused milliseconds are subtracted rather than counted, and
 a countdown that overshoots while the window was asleep records the session it
 was, not the time the machine was away for.
+
+The break after a session is the same kind of clock with none of the record.
+It is held in `focusStore` only — no row, no XP, nothing in statistics,
+history or streaks (§35, §36, §88) — so closing the app during one simply
+loses it. The other windows learn of it through `src/lib/focus-sync.ts` on a
+`focus://break` event of its own, since there is nothing in the database for
+them to re-read. Every window counts it down and reaches the end, so the
+"break over" notification goes through `announce_break_over` in
+`commands/notification.rs`, which shows it for the first window to ask per
+break and tells the rest they were not first — which is also how the sound
+plays once rather than once per window.
 
 **The two halves are now joined** (Prompt 4.3). `focusStore` writes the row
 before it starts the clock, so a session exists in SQLite from its first
@@ -1056,6 +1134,33 @@ task.
       it is a dash rather than a zero — a zero is a claim and a dash is not
       (§88) — which is stricter than the statistics page, where a caption, a
       week panel and seven bars say what a zero is relative to
+- [x] Start My Day — §21's morning flow, and §89's `[ START MY DAY ]` as the
+      first thing under the greeting. The button opens a dialog
+      (`src/components/dashboard/StartMyDayDialog.tsx`) with §21's summary:
+      tasks today, open High + Urgent tasks, and the estimated work left
+      (`estimated_minutes` over today's open tasks, with the ones that have no
+      estimate counted separately rather than as zero), read from the same
+      `today` view as the list below it. Under that is the start-of-day routine
+      from Settings &rsaquo; Daily as a checklist, ending in the 10-minute
+      planning session. **START MY DAY** does not launch anything itself. It
+      hands the routine to `routineStore.launchRoutine`, so what comes up is
+      the ordinary §32 launch panel with its per-action results, Retry and
+      Continue. Once the actions are done, the launch asks for a 10-minute
+      session labelled *Planning* through `requestFocus`, the same way START
+      TASK asks for a task's. The session is attached to the routine; the
+      label shows on the clock, the dashboard and the widget but is not
+      stored, so History shows it as the routine's session. The only XP is the
+      launch's own once-a-day reward. The planning session is an ordinary
+      focus session and earns what any completed session earns, so nothing
+      new pays (§88). With no start-of-day routine set, the summary still
+      shows, and the launch is replaced by **Choose a routine** (Settings
+      &rsaquo; Daily) and **Create from template**, which adds the Start My Day
+      template, makes it the start-of-day routine and opens it in the builder
+      so its guessed targets can be checked. The button is hidden once today's
+      start-of-day routine has been launched from anywhere, which is read off
+      the routine's own `last_launched_at` rather than a flag of its own. The
+      tray menu and the quick launcher both have a Start My Day item, which
+      brings the main window forward and opens the same dialog on the dashboard
 
 **Phase 7 — Notifications + Popup** ✅ complete
 
@@ -1071,7 +1176,11 @@ task.
       (`commands/notification.rs::start_scheduler`) checks every 30 seconds,
       so a reminder arrives with the window closed — the point of §24 — and a
       reminder whose moment passed more than an hour ago stays quiet rather
-      than firing a backlog at whoever opens the laptop
+      than firing a backlog at whoever opens the laptop. Set from the Reminder
+      field on the Add task form and in the edit dialog
+      (`src/components/tasks/TaskReminderField.tsx`): None, 5–60 minutes
+      before (which needs a due time), or at a time on the due date. The task
+      row shows it ("Reminder 10 minutes before"), marked when snoozed
 - [x] Focus completion notification — hung off the end of the *session* rather
       than the end of the countdown (`commands/focus.rs`), so it fires wherever
       the timer was being watched from, and only for a session that reached
@@ -1104,7 +1213,8 @@ task.
       Enter. §16's full dialog does not fit 340px, and a popup that made
       adding a task slower than opening the app would defeat the one thing
       §25 asks for; the defaults it fills in (due today, normal priority) are
-      the ones that dialog opens on anyway. It stays open between adds
+      the ones that dialog opens on unless Settings &rsaquo; Daily changes its
+      priority. It stays open between adds
 - [x] Quick routine launching — the mockup's `🚀 Start Coding`
       (`src/components/popup/PopupRoutineLaunch.tsx`): the most-used routine
       as a one-click button, ranked by the same `quickStartRoutines` the
@@ -1129,8 +1239,9 @@ task.
       item shows the main window and emits one `tray://action`, and
       `src/hooks/useTrayActions.ts` turns it into the same call the button
       for it makes: `launchRoutine` (with §32's checklist panel),
-      `startFocusFor`, `openQuickAdd`, or a navigation. Only Exit is handled
-      in Rust, because quitting is the one thing no window can do for itself
+      `startFocusFor`, `openQuickAdd`, Start My Day's dialog, or a
+      navigation. Only Exit is handled in Rust, because quitting is the one
+      thing no window can do for itself
 - [x] Close to tray — closing the main window hides it instead of quitting,
       so the tray has an app to be the "fastest access point" to. The focus
       session keeps running and the popup is kept, because neither is ending;
@@ -1152,13 +1263,14 @@ task.
       popup: it has to appear over whatever the user is doing, with the app
       minimised to the tray or never opened. Undecorated, sized to its own
       contents, and gone the moment it loses focus. The search box filters
-      routines *and* the two quick actions; the whole window is one text field
+      routines *and* the quick actions; the whole window is one text field
       — arrows move a drawn selection, Enter runs it, Escape backs out of the
       add-task mode and then out of the window — because a launcher you have
       to Tab into is one you have stopped being able to type in. Routines
       launch through the same `launch_routine` and tasks are added through the
-      same `create_task`; only `⏱ Start Focus` is handed to the main window,
-      because a focus session is a clock and the clock lives there
+      same `create_task`; only `⏱ Start Focus` and Start My Day are handed to
+      the main window, because a focus session is a clock and the clock lives
+      there (and so do Start My Day's dialog and launch panel)
 
 **Phase 9 — Simple Gamification** ✅ complete
 
@@ -1200,19 +1312,28 @@ task.
       whole hours for Deep Work, because "7 / 10" is a sentence and
       "25200 / 36000" is not — and the two with nothing to count carry none,
       since a bar reading "0 / 1" beside "Complete your first task" says
-      nothing the empty tile did not. Organized counts finished maintenance
-      quests, which is what §43 calls the cleanup work §§38-42 will produce
+      nothing the empty tile did not. Organized counts distinct days with a
+      cleanup action in one of the cleanup utilities (see "Cleanup in the
+      quest system" under Phase 10), and ten of them unlock it
 - [x] Daily quests — §44's TODAY'S OBJECTIVES
-      (`src/components/dashboard/DailyQuests.tsx`, `src/lib/quests.ts`):
-      exactly three a day, one each from a tasks / focus / routines track, and
-      generated as a pure function of the date rather than rolled — so every
-      window agrees about today without a table having to, and the list cannot
-      change under the user mid-morning. Progress is counted from work Stages
-      1, 2 and 4 already record, so a tick means the work is really done; the
-      routine track's harder quest pairs a launch with a finished session,
-      which is §88's own answer to a quest that would otherwise pay for
+      (`src/components/dashboard/DailyQuests.tsx`,
+      `src-tauri/src/services/quests.rs`): three a day, one each from a
+      tasks / focus / routines track, or two when Settings &rsaquo; Daily says
+      so (the routines track is the one dropped), and generated as a pure
+      function of the date rather than rolled — so every window agrees about
+      today without a table having to, and the list cannot change under the
+      user mid-morning. The pool, the day's pick and the counting live in
+      Rust, and `get_daily_quests` sends the day's quests with their counts
+      already in them; `src/lib/quests.ts` only draws them. Progress is
+      counted from work Stages 1, 2 and 4 already record, so a tick means the
+      work is really done: "Complete a 25-minute focus session" needs a
+      finished session of 25 minutes, and routines are counted once each from
+      `routine_launches`. The routine track's harder quest pairs a launch with
+      a finished session of at least the five minutes a session needs to earn
+      XP, which is §88's own answer to a quest that would otherwise pay for
       pressing START twice. The boxes are icons, not checkboxes: there is no
-      way to tick one by hand, so it does not invite a click it cannot honour
+      way to tick one by hand, so it does not invite a click it cannot honour.
+      Every third day a cleanup quest takes the last slot (see Phase 10)
 - [x] Progress page — §§45-47 under `/progress`
       (`src/components/progress/`): the level bar sits above the sub-nav
       because the level belongs to the section rather than to one of its three
@@ -1227,11 +1348,14 @@ task.
 - [x] Real numbers behind the UI — `src/services/xpService.ts` reads the real
       commands, and the swap was the one file 9.2 predicted: no store,
       component or type was reopened to make it. Quest completions are the one
-      thing the frontend records rather than reads, because a quest is finished
-      by the user ticking it off and nothing in the backend can observe that.
-      The quest itself is still not stored — it is a pure function of the date
-      — so the row behind a completion is created at the moment it is first
-      needed, keyed by the generator's own id and the day
+      thing the frontend asks for rather than reads: the checklist calls
+      `complete_quest` with a quest's id when it sees the quest done, and Rust
+      decides (§88). It refuses an id the pool does not know, a quest the day
+      does not offer, and one whose requirement it re-counts from the database
+      and finds unmet, with a sentence saying what is still outstanding. The
+      quest itself is still not stored — it is a pure function of the date —
+      so the row behind a completion is created at the moment it is first
+      paid, keyed by the generator's own id and the day
       (`database/migrations/0006_quest_keys.sql`). That key is what makes the
       grant idempotent per quest per day: the checklist re-counts the day on
       every load, in every window, so the guard has to be somewhere both
@@ -1393,6 +1517,24 @@ addition rather than as part of what the phase was measured against.
       and free space is the figure Explorer prints so the two agree — and the
       whole feature takes no database connection and stores nothing, since a
       remembered folder size is a claim about a disk that changes every minute
+- [x] Cleanup in the quest system — §§43, 44, 47, 67
+      (`database/migrations/0009_cleanup_actions.sql`,
+      `src-tauri/src/services/cleanup_actions.rs`). The move, delete, archive
+      and organize commands of the five utilities that act on files write one
+      `cleanup_actions` row after the files are handled, and only when at
+      least one succeeded. The row records the utility, the action, the item
+      count and the time, and never a path or a file name. Storage has no
+      file actions, so it writes none. Every third day, by date, one of three
+      cleanup quests ("Organize Downloads", "Tidy your Desktop", "File your
+      screenshots") takes the day's last quest slot, so the day still holds 2
+      or 3. It is done by one action in its own utility that day, links to that
+      utility's page, and does nothing else. §67 holds because of which way the
+      data flows: actions write rows, the quest and Organized read them, and
+      nothing reads them to decide what to do to a file. The quest pays its
+      usual +25 once a day through `complete_quest`, and the action itself
+      earns nothing (§88). Organized counts days with a cleanup action, so a
+      burst of deletes in one sitting is one day, not the achievement. The
+      table is carried by export and import
 
 **Phase 11 — Productivity Analytics** ✅ complete
 
@@ -1410,9 +1552,11 @@ with no cache to keep honest.
       seconds, but so does a session the app was killed during, and a total a
       crash can inflate is not a total. These are the same hours §47's Deep
       Work achievement counts, so the tab and the tile cannot disagree
-- [x] Weekly focus time — the same sum over Monday to Sunday of the current
-      week. The week is derived in SQLite (`'-6 days'`, `'weekday 1'`) so it
-      contains today rather than starting from it, and every timestamp is
+- [x] Weekly focus time — the same sum over the seven days of the current
+      week, which starts on Monday or on Sunday as Settings &rsaquo; Daily
+      says. The week is derived in SQLite (`'-6 days'`, then `'weekday 1'` or
+      `'weekday 0'`) so it contains today rather than starting from it, and
+      the range under THIS WEEK names its first and last weekday. Every timestamp is
       converted with `'localtime'` first — a session finished at 11pm Friday
       counts for the Friday the user was living in
 - [x] Task completion rate — §36's `Tasks: 6 / 8` and `Completion: 75%`. The
@@ -1446,7 +1590,7 @@ with no cache to keep honest.
       week's own busiest day rather than a target: there is no correct number
       of focused hours in a day, and a fixed ceiling would invent one. Days
       still to come are dimmed rather than dropped, so the row keeps its shape
-      from Monday morning
+      from the week's first morning
 - [x] Stage 2's deferred routine statistics — §33's five figures are all
       measured now (`list_routine_statistics`). Focus time, average session
       and tasks completed had no source when the panel was built, because

@@ -26,11 +26,29 @@
  * frontend.
  */
 
-/** What a focus session started from a task should be sized and labelled by. */
+/**
+ * What a focus session started from a launch should be sized and labelled by.
+ *
+ * Usually a task's (section 18's START TASK). Start My Day's is the one
+ * without a task: section 21's "Start 10-minute planning session" is attached
+ * to the start-of-day routine and carries a {@link label} instead.
+ */
 export interface FocusIntent {
-  taskId: number;
+  taskId: number | null;
   /** The task's title, for the timer's "Task: ..." line (section 18). */
-  taskTitle: string;
+  taskTitle: string | null;
+  /**
+   * What the session is for when it is not a task — `"Planning"` for Start My
+   * Day. Drawn on the clock and never stored: `focus_sessions` has no column
+   * for it, so the recorded session is simply one against the routine.
+   */
+  label: string | null;
+  /**
+   * The break after the session, when the caller decides it. Absent means
+   * whatever the preset says; Start My Day passes null, because ten minutes of
+   * planning is a warm-up and not the first half of a pomodoro.
+   */
+  breakMinutes?: number | null;
   /**
    * How long the session should run, in minutes, or null when nothing named a
    * length — see {@link focusMinutesFor}. A null is "the user picks", not

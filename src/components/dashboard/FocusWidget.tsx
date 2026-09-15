@@ -176,7 +176,7 @@ function TodayTotal({
  */
 function RunningSession({ session }: { session: ActiveFocusSession }) {
   const isPaused = session.status === "paused";
-  const attachment = session.taskTitle ?? session.routineName;
+  const attachment = session.taskTitle ?? session.label ?? session.routineName;
 
   return (
     <div className="mx-5 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-3 py-2 text-sm">

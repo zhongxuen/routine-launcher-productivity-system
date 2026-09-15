@@ -42,7 +42,11 @@ import type {
   RoutineWithActions,
 } from "@/types/routine";
 import type { RoutineStatistics } from "@/types/analytics";
-import type { RoutineRun, RoutineRunAction, RoutineRunTask } from "@/types/routine-ui";
+import type {
+  RoutineLaunchOptions,
+  RoutineRun,
+  RoutineRunAction,
+} from "@/types/routine-ui";
 
 interface RoutineState {
   /** Every routine with its ordered actions, as the service returned them. */
@@ -96,12 +100,14 @@ interface RoutineState {
   /**
    * Run the routine, updating the panel as each action resolves.
    *
-   * `task` is section 18's START TASK: the same launch, plus the task it is
-   * for. Passing one makes the panel show the task and its focus length, and
-   * emits a focus intent once the workspace is open — see `launchRoutine`'s
-   * body for the Stage 5 seam.
+   * `options.task` is section 18's START TASK: the same launch, plus the task
+   * it is for. Passing one makes the panel show the task and its focus length,
+   * and emits a focus intent once the workspace is open — see
+   * `launchRoutine`'s body for the Stage 5 seam. `options.planning` is section
+   * 21's Start My Day, which does the same with a labelled planning session in
+   * place of the task's.
    */
-  launchRoutine: (id: number, task?: RoutineRunTask) => Promise<void>;
+  launchRoutine: (id: number, options?: RoutineLaunchOptions) => Promise<void>;
   /** Section 32's Retry: run the failed actions again, and only those. */
   retryFailedActions: () => Promise<void>;
   /** Section 32's Continue: accept the partial result and move on. */
@@ -225,12 +231,14 @@ export const useRoutineStore = create<RoutineState>((set, get) => ({
     announceDataChanged("routines");
   },
 
-  async launchRoutine(id, task) {
+  async launchRoutine(id, options = {}) {
     if (get().run?.status === "running") return;
 
     const routine = get().routines.find((candidate) => candidate.id === id);
     if (!routine) return;
 
+    const task = options.task ?? null;
+    const planning = task ? null : (options.planning ?? null);
     const token = ++runToken;
 
     // Every action is on screen from the first frame, greyed out and waiting,
@@ -241,7 +249,8 @@ export const useRoutineStore = create<RoutineState>((set, get) => ({
         routineName: routine.name,
         routineIcon: routine.icon,
         status: "running",
-        task: task ?? null,
+        task,
+        planning,
         actions: markNextRunning(
           routine.actions.map((action) => ({
             action,
@@ -280,7 +289,26 @@ export const useRoutineStore = create<RoutineState>((set, get) => ({
       requestFocus({
         taskId: task.taskId,
         taskTitle: task.title,
+        label: null,
         minutes: task.focusMinutes,
+        routineId: routine.id,
+        routineName: routine.name,
+      });
+    }
+
+    // Section 21's last line, "Start 10-minute planning session", in the same
+    // place and on the same terms: after the workspace is open, and whether
+    // or not all of it opened. It is an ordinary focus session attached to
+    // the start-of-day routine, so it pays what any session pays and nothing
+    // more (section 88) — pressing START MY DAY is itself worth only the
+    // routine launch's own once-a-day XP.
+    if (planning && token === runToken) {
+      requestFocus({
+        taskId: null,
+        taskTitle: null,
+        label: planning.label,
+        minutes: planning.minutes,
+        breakMinutes: null,
         routineId: routine.id,
         routineName: routine.name,
       });

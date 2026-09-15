@@ -19,11 +19,18 @@
 //! There is no command that deletes "everything old" or "the whole
 //! Installers category", because there is no point in the product where the
 //! app, rather than the user, gets to decide that.
+//!
+//! The two that change something also leave a row in `cleanup_actions` once
+//! at least one file was handled, which is what the cleanup quest and the
+//! Organized achievement count. The row is written after the files have been
+//! handled, never before, and holds no path.
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
+use crate::db::DbConnection;
+use crate::services::cleanup_actions::{self, CleanupAction, CleanupUtility};
 use crate::services::downloads::{self, ActionReport, DownloadsScan};
 
 /// The user's Downloads folder, as the OS reports it.
@@ -61,11 +68,20 @@ pub fn scan_downloads(app: AppHandle) -> Result<DownloadsScan, String> {
 #[tauri::command]
 pub fn move_downloads_files(
     app: AppHandle,
+    db: State<DbConnection>,
     paths: Vec<String>,
     destination: String,
 ) -> Result<ActionReport, String> {
     let folder = downloads_dir(&app)?;
-    downloads::move_files(&folder, &paths, &destination).map_err(|error| error.to_string())
+    let report =
+        downloads::move_files(&folder, &paths, &destination).map_err(|error| error.to_string())?;
+    cleanup_actions::note(
+        &db,
+        CleanupUtility::Downloads,
+        CleanupAction::Move,
+        report.succeeded,
+    );
+    Ok(report)
 }
 
 /// Deletes the files the user selected, permanently.
@@ -75,9 +91,20 @@ pub fn move_downloads_files(
 /// it never runs on a list the user did not tick: an empty `paths` is
 /// refused by the service rather than treated as "all of them".
 #[tauri::command]
-pub fn delete_downloads_files(app: AppHandle, paths: Vec<String>) -> Result<ActionReport, String> {
+pub fn delete_downloads_files(
+    app: AppHandle,
+    db: State<DbConnection>,
+    paths: Vec<String>,
+) -> Result<ActionReport, String> {
     let folder = downloads_dir(&app)?;
-    downloads::delete_files(&folder, &paths).map_err(|error| error.to_string())
+    let report = downloads::delete_files(&folder, &paths).map_err(|error| error.to_string())?;
+    cleanup_actions::note(
+        &db,
+        CleanupUtility::Downloads,
+        CleanupAction::Delete,
+        report.succeeded,
+    );
+    Ok(report)
 }
 
 /// Opens one downloaded file with whatever the OS opens it with.

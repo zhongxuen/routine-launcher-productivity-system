@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Clock, Play, Repeat, Timer } from "lucide-react";
+import { AlarmClock, Bell, Clock, Play, Repeat, Star, Timer } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -25,8 +25,10 @@ import {
   PRIORITY_DOT,
 } from "@/lib/task-utils";
 import { DEFAULT_ROUTINE_ICON as RoutineGlyph, routineTimerMinutes } from "@/lib/routine-utils";
+import { describeReminder, isSnoozed } from "@/services/notificationService";
 import { useRoutineStore } from "@/stores/routineStore";
 import { useTaskStore } from "@/stores/taskStore";
+import type { TaskReminder } from "@/types/notification";
 import { TASK_PRIORITY_LABELS, type Task } from "@/types/task";
 
 interface TaskRowProps {
@@ -35,6 +37,11 @@ interface TaskRowProps {
   showDate?: boolean;
   /** Show the repeat schedule — on in the Recurring view, off elsewhere. */
   showRecurrence?: boolean;
+  /**
+   * This task's place among today's top priorities (PLAN TODAY, 1 to 3), or
+   * undefined for a task that is not one. Only the Today view passes it.
+   */
+  priorityRank?: number;
   /**
    * Where this row is in its life on screen, from `TaskSection`'s
    * `useAnimatedList`. Defaults to `present`, so a row rendered outside an
@@ -76,6 +83,7 @@ function TaskRow({
   task,
   showDate = false,
   showRecurrence = false,
+  priorityRank,
   phase = "present",
 }: TaskRowProps) {
   const toggleTaskCompletion = useTaskStore((state) => state.toggleTaskCompletion);
@@ -190,6 +198,7 @@ function TaskRow({
         </div>
 
         <div className="ml-3.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+          {priorityRank !== undefined && <PriorityMark rank={priorityRank} />}
           {isCompleted ? (
             <>
               {completedAt && <span>Completed at {completedAt}</span>}
@@ -207,6 +216,7 @@ function TaskRow({
                   Due {dueTime}
                 </span>
               )}
+              {task.reminder && <ReminderMeta reminder={task.reminder} />}
               {duration && <span>{duration}</span>}
               {/* An unfinished task that has already been worked on: the
                   estimate says how long it should take, this says how much of
@@ -308,6 +318,29 @@ function TaskRow({
 }
 
 /**
+ * One of today's top priorities, picked in PLAN TODAY (section 51).
+ *
+ * Kept as quiet as the rest of the meta row, since section 12 wants visual
+ * indicators to be subtle: the task is already listed under its priority
+ * level, and this is a note on top of that.
+ */
+function PriorityMark({ rank }: { rank: number }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center gap-1 text-foreground/70">
+          <Star className="size-3" aria-hidden />
+          <span>
+            <span className="sr-only">Top priority </span>#{rank} today
+          </span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>Top priority {rank} of today&apos;s plan</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
  * Measured focus time in the meta row (sections 17 and 19).
  *
  * The tooltip is what separates it from the estimate sitting next to it: one
@@ -323,6 +356,45 @@ function FocusTime({ label }: { label: string }) {
         </span>
       </TooltipTrigger>
       <TooltipContent>Actual focus time recorded against this task</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * The reminder set on an open task (section 24), in the meta row. A finished
+ * task's reminder never fires, so the completed row does not show it.
+ *
+ * A snoozed reminder says so, with the time it comes back in the tooltip:
+ * "10 minutes before" alone would be wrong about when the next nudge is.
+ */
+function ReminderMeta({ reminder }: { reminder: TaskReminder }) {
+  const phrase = describeReminder(reminder);
+  if (!phrase) return null;
+
+  // `describeReminder` writes a phrase that stands alone ("At 5:00 PM");
+  // after "Reminder" its capital would sit mid-sentence.
+  const label = `Reminder ${phrase.charAt(0).toLowerCase()}${phrase.slice(1)}`;
+
+  if (!isSnoozed(reminder)) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <Bell className="size-3" />
+        {label}
+      </span>
+    );
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center gap-1 border-b border-dashed border-muted-foreground/30">
+          <AlarmClock className="size-3" />
+          {label} · snoozed
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        Snoozed until {formatTimestampTime(reminder.snoozed_until)}
+      </TooltipContent>
     </Tooltip>
   );
 }

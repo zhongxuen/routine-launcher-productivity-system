@@ -7,12 +7,12 @@
  * running session is not something a window can re-read its way back to. See
  * `src/lib/focus-sync.ts`.
  *
- * Three lines of it:
+ * Three lines of it, each for the session and for the break that follows it:
  *
- * 1. **Adopt** what another window says the clock reads.
- * 2. **Answer** another window asking, but only when there is a session to
- *    answer with — silence is what "nothing is running" sounds like, and a
- *    window with no session has nothing to add.
+ * 1. **Adopt** what another window says the clock, or the break, reads.
+ * 2. **Answer** another window asking, but only with what there is to answer
+ *    with — silence is what "nothing is running" sounds like, and a window
+ *    with no session and no break has nothing to add.
  * 3. **Ask**, once, on mount. Announcements are only made when something
  *    changes, so a widget opened forty minutes into a session would otherwise
  *    hear nothing until it ended.
@@ -25,7 +25,9 @@ import { useEffect } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 import {
+  announceFocusBreak,
   announceFocusSession,
+  onFocusBreakAnnounced,
   onFocusSessionAnnounced,
   onFocusSessionRequested,
   requestFocusSession,
@@ -49,9 +51,15 @@ export function useFocusSync(): void {
       onFocusSessionAnnounced((session) => {
         useFocusStore.getState().adoptSession(session);
       }),
+      onFocusBreakAnnounced((focusBreak) => {
+        useFocusStore.getState().adoptBreak(focusBreak);
+      }),
       onFocusSessionRequested(() => {
-        const session = useFocusStore.getState().session;
+        const { session, focusBreak } = useFocusStore.getState();
         if (session) announceFocusSession(session);
+        // A break is nowhere but in the windows holding it, so a window
+        // opened mid-break can only learn of it here.
+        if (focusBreak) announceFocusBreak(focusBreak);
       }),
     ])
       .then((fns) => {

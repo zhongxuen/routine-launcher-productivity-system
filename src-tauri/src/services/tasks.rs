@@ -23,7 +23,7 @@ use super::serde_util::double_option;
 use super::task_recurrence::{self, NewRecurrence};
 use super::xp;
 use super::validate::{
-    normalize_text, optional_integer, optional_text, validate_optional_date,
+    normalize_text, optional_integer, optional_text, validate_date, validate_optional_date,
     validate_optional_time,
 };
 
@@ -180,7 +180,7 @@ impl TaskPriority {
         }
     }
 
-    fn parse(value: &str) -> Option<Self> {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
         match value {
             "low" => Some(Self::Low),
             "normal" => Some(Self::Normal),
@@ -420,6 +420,39 @@ pub struct TaskFilter {
     /// Cap the number of rows returned (useful for dashboard summaries and
     /// completed-task history).
     pub limit: Option<i64>,
+}
+
+/// A repeating task that a future day will get but does not have yet: one row
+/// of the read-only Repeats group on a dated Today view (development-plan.md
+/// section 53's Tomorrow).
+///
+/// Not a [`Task`], because there is no task yet: [`ensure_recurring_instances`]
+/// only makes today's, so tomorrow's is created on the day. The fields are
+/// those the instance will be cloned with, read from the series' most recent
+/// task, so an edit made today shows up in tomorrow's preview.
+#[derive(Debug, Clone, Serialize)]
+pub struct RepeatPreview {
+    pub recurrence_id: i64,
+    pub title: String,
+    pub priority: TaskPriority,
+    pub category_id: Option<i64>,
+    pub due_time: Option<String>,
+    pub estimated_minutes: Option<i64>,
+    pub routine_id: Option<i64>,
+}
+
+impl RepeatPreview {
+    fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            recurrence_id: row.get("recurrence_id")?,
+            title: row.get("title")?,
+            priority: row.get("priority")?,
+            category_id: row.get("category_id")?,
+            due_time: row.get("due_time")?,
+            estimated_minutes: row.get("estimated_minutes")?,
+            routine_id: row.get("routine_id")?,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -696,15 +729,7 @@ pub fn list(conn: &Connection, filter: TaskFilter) -> ServiceResult<Vec<Task>> {
         TaskView::Recurring => clauses.push(LATEST_IN_SERIES_PREDICATE.to_owned()),
     }
 
-    if let Some(statuses) = filter.statuses.filter(|statuses| !statuses.is_empty()) {
-        let placeholders = vec!["?"; statuses.len()].join(", ");
-        clauses.push(format!("status IN ({placeholders})"));
-        values.extend(
-            statuses
-                .into_iter()
-                .map(|status| Value::Text(status.as_str().to_owned())),
-        );
-    }
+    push_status_clause(&mut clauses, &mut values, filter.statuses);
 
     if let Some(priority) = filter.priority {
         clauses.push("priority = ?".to_owned());
@@ -748,9 +773,143 @@ pub fn list(conn: &Connection, filter: TaskFilter) -> ServiceResult<Vec<Task>> {
     Ok(tasks)
 }
 
+/// One day's tasks: those due on `date` (`YYYY-MM-DD`), in the order the day
+/// is worked through. This backs the dated Today view, i.e. section 53's
+/// Yesterday and Tomorrow.
+///
+/// Unlike [`TaskView::Today`] it carries nothing over from earlier days. On
+/// Tuesday's page the question is "what was due on Tuesday", not "what do I
+/// still owe", and a task left open from Monday already appears on today's
+/// page.
+///
+/// It is a separate function rather than a date field on [`TaskFilter`]: the
+/// Today view's carry-over applies to today only, and a date field would
+/// combine with it, and with every other view, in ways no screen asks for.
+/// `statuses` narrows the list the same way `TaskFilter::statuses` does.
+pub fn list_for_date(
+    conn: &Connection,
+    date: &str,
+    statuses: Option<Vec<TaskStatus>>,
+) -> ServiceResult<Vec<Task>> {
+    let date = validate_date(DATE, date)?;
+
+    let mut clauses = vec!["due_date = ?".to_owned()];
+    let mut values = vec![Value::Text(date)];
+    push_status_clause(&mut clauses, &mut values, statuses);
+
+    let sql = format!(
+        "SELECT {} FROM tasks WHERE {} ORDER BY {}",
+        task_columns(),
+        clauses.join(" AND "),
+        order_by(TaskView::Today)
+    );
+
+    let mut statement = conn.prepare(&sql)?;
+    let tasks = statement
+        .query_map(params_from_iter(values), Task::from_row)?
+        .collect::<rusqlite::Result<Vec<Task>>>()?;
+
+    Ok(tasks)
+}
+
+/// Adds `status IN (...)` for a non-empty status list. A missing or empty list
+/// adds nothing, which is how "no status filter" is spelled on the wire.
+fn push_status_clause(
+    clauses: &mut Vec<String>,
+    values: &mut Vec<Value>,
+    statuses: Option<Vec<TaskStatus>>,
+) {
+    let Some(statuses) = statuses.filter(|statuses| !statuses.is_empty()) else {
+        return;
+    };
+
+    let placeholders = vec!["?"; statuses.len()].join(", ");
+    clauses.push(format!("status IN ({placeholders})"));
+    values.extend(
+        statuses
+            .into_iter()
+            .map(|status| Value::Text(status.as_str().to_owned())),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Recurrence
 // ---------------------------------------------------------------------------
+
+/// The repeating series that owe a task on `date` and do not have one yet.
+///
+/// [`ensure_recurring_instances`] fills these in for today, and
+/// [`list_repeats_for_date`] previews them for a day still to come. Both use
+/// this function, so the preview cannot show a task the generator would not
+/// create, or miss one it would.
+///
+/// A rule whose series has no tasks left (the user deleted all of them) is
+/// still returned here. Both callers read the series' latest task next, and
+/// both do nothing when there isn't one.
+fn series_owed_on(conn: &Connection, date: &str) -> ServiceResult<Vec<i64>> {
+    let mut owed = Vec::new();
+
+    for rule in task_recurrence::list(conn)? {
+        if !task_recurrence::occurs_on(conn, &rule, date)? {
+            continue;
+        }
+
+        let already_scheduled: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE recurrence_id = ?1 AND due_date = ?2)",
+            params![rule.id, date],
+            |row| row.get(0),
+        )?;
+        if !already_scheduled {
+            owed.push(rule.id);
+        }
+    }
+
+    Ok(owed)
+}
+
+/// The repeating tasks `date` will get that do not exist yet, for the
+/// read-only Repeats group (development-plan.md section 53's Tomorrow).
+///
+/// Reads only. Section 23's generator makes today's instance and nothing
+/// further ahead (see [`ensure_recurring_instances`]), and that stays true:
+/// this answers "what will be there" without writing anything.
+///
+/// Empty for today and every earlier day. Today's instances are created
+/// before any view is read, and past days are never back-filled, so only a
+/// future day can have repeats that are due but not yet created.
+pub fn list_repeats_for_date(conn: &Connection, date: &str) -> ServiceResult<Vec<RepeatPreview>> {
+    let date = validate_date(DATE, date)?;
+    if date <= task_recurrence::local_today(conn)? {
+        return Ok(Vec::new());
+    }
+
+    let owed = series_owed_on(conn, &date)?;
+    if owed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // The latest task in each series is the row the day's instance will be
+    // cloned from, by the same `MAX(id)` rule the generator uses.
+    let placeholders = vec!["?"; owed.len()].join(", ");
+    let sql = format!(
+        "SELECT recurrence_id, title, priority, category_id, due_time, estimated_minutes, \
+                routine_id \
+           FROM tasks \
+          WHERE {LATEST_IN_SERIES_PREDICATE} AND recurrence_id IN ({placeholders}) \
+          ORDER BY CASE WHEN due_time IS NULL THEN 1 ELSE 0 END, \
+                   due_time, \
+                   CASE priority \
+                      WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, \
+                   id"
+    );
+
+    let mut statement = conn.prepare(&sql)?;
+    let previews = statement
+        .query_map(params_from_iter(owed), RepeatPreview::from_row)?
+        .collect::<rusqlite::Result<Vec<RepeatPreview>>>()?;
+
+    Ok(previews)
+}
 
 /// Makes sure every repeating series has today's task in it, and returns the
 /// ones it had to create — section 23's "the system automatically
@@ -776,20 +935,7 @@ pub fn ensure_recurring_instances(conn: &Connection) -> ServiceResult<Vec<Task>>
 
     let mut created = Vec::new();
 
-    for rule in task_recurrence::list(conn)? {
-        if !task_recurrence::occurs_on(conn, &rule, &today)? {
-            continue;
-        }
-
-        let already_scheduled: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE recurrence_id = ?1 AND due_date = ?2)",
-            params![rule.id, today],
-            |row| row.get(0),
-        )?;
-        if already_scheduled {
-            continue;
-        }
-
+    for rule_id in series_owed_on(conn, &today)? {
         // A rule with no tasks left (the user deleted the whole series) has
         // nothing to copy, so it simply stops producing.
         // The reminder's *configuration* is copied and its delivery state is
@@ -811,7 +957,7 @@ pub fn ensure_recurring_instances(conn: &Connection) -> ServiceResult<Vec<Task>>
               WHERE recurrence_id = ?1
               ORDER BY id DESC
               LIMIT 1",
-            params![rule.id, today],
+            params![rule_id, today],
         )?;
 
         if inserted == 0 {
@@ -860,6 +1006,8 @@ const MISSING_ROUTINE: &str = "That routine no longer exists.";
 /// input the user actually filled in.
 const DUE_DATE: &str = "Due date";
 const DUE_TIME: &str = "Due time";
+/// The day a dated view is asking about, not a field on the task.
+const DATE: &str = "Date";
 
 fn task_not_found(id: i64) -> ServiceError {
     ServiceError::not_found(format!("Task {id} was not found."))
@@ -1766,6 +1914,163 @@ mod tests {
         assert!(matches!(result, Err(ServiceError::Validation(_))));
         assert!(list(&conn, TaskFilter::default()).unwrap().is_empty());
         assert!(task_recurrence::list(&conn).unwrap().is_empty());
+    }
+
+    /// The weekday token (`"MON"`) of the local date `days` days from today.
+    fn weekday_in(conn: &Connection, days: i64) -> &'static str {
+        let weekday: i64 = conn
+            .query_row(
+                "SELECT CAST(strftime('%w', date('now', 'localtime', ?1)) AS INTEGER)",
+                params![format!("{days:+} days")],
+                |row| row.get(0),
+            )
+            .unwrap();
+        ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][weekday as usize]
+    }
+
+    fn task_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_dated_day_lists_what_was_due_on_it_and_carries_nothing_over() {
+        let conn = init_memory_db().unwrap();
+        let yesterday = days_ago(&conn, 1);
+
+        create(&conn, new_task(json!({ "title": "Left open", "due_date": yesterday }))).unwrap();
+        let done = create(&conn, new_task(json!({ "title": "Ticked off", "due_date": yesterday })))
+            .unwrap();
+        update(&conn, done.id, task_update(json!({ "status": "completed" }))).unwrap();
+        let dropped = create(&conn, new_task(json!({ "title": "Dropped", "due_date": yesterday })))
+            .unwrap();
+        update(&conn, dropped.id, task_update(json!({ "status": "cancelled" }))).unwrap();
+        // Still owed from earlier: Today carries it, yesterday's page does not.
+        create(
+            &conn,
+            new_task(json!({ "title": "Older", "due_date": days_ago(&conn, 3) })),
+        )
+        .unwrap();
+        create(
+            &conn,
+            new_task(json!({ "title": "Today's", "due_date": local_today(&conn) })),
+        )
+        .unwrap();
+
+        let all = list_for_date(&conn, &yesterday, None).unwrap();
+        assert_eq!(titles(&all), vec!["Left open", "Ticked off", "Dropped"]);
+
+        let shown = list_for_date(
+            &conn,
+            &yesterday,
+            Some(vec![TaskStatus::Todo, TaskStatus::InProgress, TaskStatus::Completed]),
+        )
+        .unwrap();
+        assert_eq!(titles(&shown), vec!["Left open", "Ticked off"]);
+        // The open one is still late, the same as it is on Today's page.
+        assert!(shown[0].is_overdue);
+        assert_eq!(shown[0].days_overdue, 1);
+
+        // Today's own view is untouched by any of this.
+        let today = list(&conn, task_filter(json!({ "view": "today" }))).unwrap();
+        assert_eq!(titles(&today), vec!["Older", "Left open", "Today's"]);
+
+        assert!(matches!(
+            list_for_date(&conn, "16/09/2026", None),
+            Err(ServiceError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn tomorrow_previews_its_repeats_without_creating_them() {
+        let conn = init_memory_db().unwrap();
+        let start = days_ago(&conn, 3);
+
+        create(
+            &conn,
+            new_task(json!({
+                "title": "Check email",
+                "priority": "high",
+                "due_time": "09:00",
+                "estimated_minutes": 15,
+                "due_date": start,
+                "recurrence": { "frequency": "daily", "start_date": start },
+            })),
+        )
+        .unwrap();
+        let today_instance = ensure_recurring_instances(&conn).unwrap().remove(0);
+        // Tomorrow is cloned from the latest instance, so an edit made today
+        // has to show up in the preview.
+        update(
+            &conn,
+            today_instance.id,
+            task_update(json!({ "title": "Check email and chat" })),
+        )
+        .unwrap();
+        let before = task_count(&conn);
+
+        let tomorrow = days_ago(&conn, -1);
+        let previews = list_repeats_for_date(&conn, &tomorrow).unwrap();
+        assert_eq!(previews.len(), 1);
+        assert_eq!(previews[0].title, "Check email and chat");
+        assert_eq!(Some(previews[0].recurrence_id), today_instance.recurrence_id);
+        assert_eq!(previews[0].priority, TaskPriority::High);
+        assert_eq!(previews[0].due_time.as_deref(), Some("09:00"));
+        assert_eq!(previews[0].estimated_minutes, Some(15));
+
+        // Previewing wrote nothing: tomorrow still has no real task.
+        assert_eq!(task_count(&conn), before);
+        assert!(list_for_date(&conn, &tomorrow, None).unwrap().is_empty());
+
+        // Today's instance already exists and past days are never back-filled,
+        // so neither has anything to preview.
+        assert!(list_repeats_for_date(&conn, &local_today(&conn)).unwrap().is_empty());
+        assert!(list_repeats_for_date(&conn, &days_ago(&conn, 1)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_repeat_preview_follows_the_schedule() {
+        let conn = init_memory_db().unwrap();
+
+        // Weekly on today's weekday: the series starts today, skips tomorrow,
+        // and comes back a week from now.
+        create(
+            &conn,
+            new_task(json!({
+                "title": "Weekly review",
+                "recurrence": { "frequency": "weekly", "days_of_week": [weekday_in(&conn, 0)] },
+            })),
+        )
+        .unwrap();
+
+        assert!(list_repeats_for_date(&conn, &days_ago(&conn, -1)).unwrap().is_empty());
+
+        let next_week = list_repeats_for_date(&conn, &days_ago(&conn, -7)).unwrap();
+        let titles: Vec<&str> = next_week.iter().map(|preview| preview.title.as_str()).collect();
+        assert_eq!(titles, vec!["Weekly review"]);
+    }
+
+    #[test]
+    fn a_series_already_dated_on_the_day_is_listed_rather_than_previewed() {
+        let conn = init_memory_db().unwrap();
+
+        // Weekly on tomorrow's weekday, so the series' first task is already
+        // a real task dated tomorrow.
+        create(
+            &conn,
+            new_task(json!({
+                "title": "Weekly review",
+                "recurrence": { "frequency": "weekly", "days_of_week": [weekday_in(&conn, 1)] },
+            })),
+        )
+        .unwrap();
+
+        let tomorrow = days_ago(&conn, -1);
+        assert_eq!(
+            titles(&list_for_date(&conn, &tomorrow, None).unwrap()),
+            vec!["Weekly review"]
+        );
+        assert!(list_repeats_for_date(&conn, &tomorrow).unwrap().is_empty());
     }
 
     /// Records a finished focus session against a task, the way the timer

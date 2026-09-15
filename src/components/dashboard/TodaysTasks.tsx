@@ -1,7 +1,7 @@
 import { Plus } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import QuickAddTask from "@/components/tasks/QuickAddTask";
+import { PLAN_TODAY_PATH } from "@/components/tasks/PlanToday";
 import TaskViewBody from "@/components/tasks/TaskViewBody";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -55,11 +55,11 @@ const openTasks = (tasks: Task[]): Task[] =>
  * scrollbar, since the point of the cap is to keep section 7's other three
  * blocks above the fold.
  *
- * **Composition note.** This widget hosts the quick-add dialog itself so
- * "+ Add Task" works wherever the widget is dropped. `QuickAddTask` is driven
- * by one flag on the task store, so whichever page composes this must not
- * mount a second copy — the Tasks page mounts its own, but it is a different
- * route and never on screen at the same time.
+ * **Composition note.** "+ Add Task" raises the one quick-add dialog the app
+ * shell mounts (`AppLayout`, beside section 16's `Ctrl+N`), so it works
+ * wherever the widget is dropped without this widget mounting a copy of its
+ * own. `QuickAddTask` is driven by one flag on the task store, and a second
+ * copy anywhere would open a second dialog on top of the first.
  */
 function TodaysTasks() {
   const { tasks, isLoading, error, reload } = useTaskView("today");
@@ -144,9 +144,16 @@ function TodaysTasks() {
             {hidden} more {hidden === 1 ? "task" : "tasks"}
           </Link>
         )}
-      </div>
 
-      <QuickAddTask />
+        {/* PLAN TODAY lives on Tasks > Today, above the full list it plans;
+            this opens it there rather than drawing a second copy here. */}
+        <Link
+          to={PLAN_TODAY_PATH}
+          className="ml-auto text-xs text-muted-foreground hover:text-foreground hover:underline"
+        >
+          Plan today
+        </Link>
+      </div>
     </section>
   );
 }

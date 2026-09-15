@@ -14,8 +14,10 @@
 
 import { format } from "date-fns";
 
+import { formatFocusTime } from "@/lib/routine-utils";
 import { parseDateKey } from "@/lib/task-utils";
 import type { DayStats, PeriodStats } from "@/types/analytics";
+import type { Task } from "@/types/task";
 
 /**
  * Section 36's "Completion: 75%", or null when nothing was owed.
@@ -58,9 +60,19 @@ export function shortDate(dateKey: string): string {
   return date ? format(date, "d MMM") : dateKey;
 }
 
-/** `"25 Aug – 31 Aug"` — the range under the This Week heading. */
-export function periodRange({ start, end }: PeriodStats): string {
-  return `${shortDate(start)} – ${shortDate(end)}`;
+/**
+ * `"Mon 25 Aug – Sun 31 Aug"` — the range under the This Week heading.
+ *
+ * The weekdays are there because the week starts on the day chosen in
+ * Settings (section 52), Monday or Sunday, and this caption is the one place
+ * the Statistics tab says which.
+ */
+export function weekRange({ start, end }: PeriodStats): string {
+  const day = (dateKey: string) => {
+    const date = parseDateKey(dateKey);
+    return date ? format(date, "EEE d MMM") : dateKey;
+  };
+  return `${day(start)} – ${day(end)}`;
 }
 
 /**
@@ -74,6 +86,43 @@ export function periodRange({ start, end }: PeriodStats): string {
 export function focusBarFraction(day: DayStats, days: DayStats[]): number {
   const busiest = days.reduce((most, candidate) => Math.max(most, candidate.focusSeconds), 0);
   return busiest <= 0 ? 0 : day.focusSeconds / busiest;
+}
+
+/**
+ * Estimated work still to do: `estimated_minutes` summed over the tasks that
+ * are not finished (section 21's "Estimated work: 4h 10m").
+ *
+ * A task with no estimate is counted in `unestimated` rather than as zero, so
+ * the caller can say how much of the day the figure leaves out — section 88
+ * would rather a total admit it is partial than look complete.
+ */
+export function estimatedWork(tasks: Task[]): { minutes: number; unestimated: number } {
+  let minutes = 0;
+  let unestimated = 0;
+
+  for (const task of tasks) {
+    if (task.status === "completed" || task.status === "cancelled") continue;
+    if (hasEstimate(task)) minutes += task.estimated_minutes;
+    else unestimated += 1;
+  }
+
+  return { minutes, unestimated };
+}
+
+/**
+ * Whether the task counts towards {@link estimatedWork}. A zero is treated as
+ * no estimate, since nothing takes no time.
+ */
+export function hasEstimate(task: Task): task is Task & { estimated_minutes: number } {
+  return task.estimated_minutes !== null && task.estimated_minutes > 0;
+}
+
+/**
+ * `250` minutes becomes `"4h 10m"`. Through `formatFocusTime`, so planned work
+ * and focused time round the same way.
+ */
+export function formatWorkMinutes(minutes: number): string {
+  return formatFocusTime(minutes * 60);
 }
 
 /**

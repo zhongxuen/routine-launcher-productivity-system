@@ -31,7 +31,7 @@
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 /** Which store's data changed. Coarse on purpose — the answer is a re-read. */
-export type DataScope = "tasks" | "routines";
+export type DataScope = "tasks" | "routines" | "settings";
 
 const DATA_CHANGED_EVENT = "app://data-changed";
 

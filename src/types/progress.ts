@@ -128,9 +128,8 @@ export type AchievementKey = (typeof ACHIEVEMENT_KEYS)[number];
 
 /**
  * How far along a locked achievement is, in whatever unit reads best for it:
- * sessions for Focused, days for Consistent, cleanup quests for Organized and
- * whole hours for Deep Work — because "7 / 10" is a sentence and
- * "25200 / 36000" is not.
+ * sessions for Focused, days for Consistent and Organized, and whole hours
+ * for Deep Work — because "7 / 10" is a sentence and "25200 / 36000" is not.
  *
  * `current` never exceeds `target`, so a tile cannot read "12 / 10".
  */

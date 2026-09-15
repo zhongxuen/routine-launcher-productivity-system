@@ -142,8 +142,9 @@ export async function resetAppData(): Promise<void> {
  * The broadcast is for the windows a reload here cannot reach: the popup, the
  * quick launcher and the widget are separate webviews with their own copies of
  * every store, and `useWindowSync` is how they are told. It is coarser than
- * this situation deserves — it re-reads tasks and routines, not the focus
- * session or the day's XP — but a widget one scope behind is better than one
+ * this situation deserves — it re-reads tasks, routines and the daily
+ * settings, not the focus session or the day's XP — but a widget one scope
+ * behind is better than one
  * listing a routine that has been deleted, and the alternative would be a
  * cross-window "everything changed" event that nothing else in the app needs.
  *
@@ -154,5 +155,6 @@ export async function resetAppData(): Promise<void> {
 export function reloadAfterRestore(delayMs = 1200): void {
   announceDataChanged("tasks");
   announceDataChanged("routines");
+  announceDataChanged("settings");
   window.setTimeout(() => window.location.reload(), delayMs);
 }

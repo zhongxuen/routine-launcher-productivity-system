@@ -13,6 +13,11 @@ interface FocusClockProps {
   percent: number | null;
   /** Dims the face for a clock that is not running yet. */
   idle?: boolean;
+  /**
+   * `break` draws the face in the break's own colour, so the one clock that
+   * is not focus is never mistaken for a session at a glance.
+   */
+  tone?: "focus" | "break";
   /** Task and routine lines, when the session has any. */
   attachment?: ReactNode;
   /** Start / Pause / Finish. */
@@ -31,7 +36,15 @@ interface FocusClockProps {
  * than as a live region: a screen reader reading out every second of a
  * fifty-minute session would be unusable.
  */
-function FocusClock({ clock, caption, percent, idle, attachment, controls }: FocusClockProps) {
+function FocusClock({
+  clock,
+  caption,
+  percent,
+  idle,
+  tone = "focus",
+  attachment,
+  controls,
+}: FocusClockProps) {
   return (
     <Card>
       <CardContent className="flex flex-col items-center gap-6 py-10">
@@ -44,6 +57,7 @@ function FocusClock({ clock, caption, percent, idle, attachment, controls }: Foc
           className={cn(
             "text-6xl font-semibold tabular-nums tracking-tight sm:text-7xl",
             idle && "text-muted-foreground/50",
+            tone === "break" && "text-focus-break",
           )}
         >
           {clock}

@@ -13,6 +13,11 @@
  * backend query (development-plan.md sections 14-15), not to the components.
  * `useTaskView` is how a route asks for one.
  *
+ * Section 53's Yesterday / Tomorrow is still that one view. `view` stays
+ * `today` and `date` names the day it is about, so paging between days swaps
+ * what the single view holds rather than opening a second one beside it (the
+ * trap `UpcomingTasks.tsx` describes).
+ *
  * Every write also announces itself to the app's other windows — the compact
  * popup of section 25 is a second webview with its own copy of this store, so
  * a task ticked off in one has to reach the other. See
@@ -27,17 +32,25 @@ import { emitProgressChanged } from "@/lib/progress-events";
 import { announceDataChanged } from "@/lib/window-sync";
 import {
   createTask as createTaskCommand,
+  createTaskCategory,
   deleteTask as deleteTaskCommand,
+  deleteTaskCategory,
   ensureRecurringTasks,
+  listRepeatsForDate,
   listTaskCategories,
   listTaskRecurrences,
   listTasks,
+  listTasksForDate,
   updateTask as updateTaskCommand,
+  updateTaskCategory,
 } from "@/services/taskService";
 import type {
   NewTask,
+  NewTaskCategory,
+  RepeatPreview,
   Task,
   TaskCategory,
+  TaskCategoryUpdate,
   TaskFilter,
   TaskRecurrence,
   TaskStatus,
@@ -92,6 +105,18 @@ interface TaskState {
   tasks: Task[];
   /** Which view `tasks` holds, so a refresh after a mutation re-reads it. */
   view: TaskView;
+  /**
+   * The day a `today` view is about (`YYYY-MM-DD`), or null for the real
+   * today, which keeps its carry-over of unfinished work from earlier days.
+   * A dated view lists only what is due on that day. Always null for every
+   * other view.
+   */
+  date: string | null;
+  /**
+   * Repeating tasks a future `date` will get but does not have yet, shown as
+   * the read-only Repeats group. Empty unless `date` is after today.
+   */
+  repeats: RepeatPreview[];
   categories: TaskCategory[];
   /** Repeat schedules keyed by id, for labelling a task's `recurrence_id`. */
   recurrences: Record<number, TaskRecurrence>;
@@ -120,7 +145,11 @@ interface TaskState {
    */
   revealedTaskId: number | null;
 
-  loadView: (view: TaskView) => Promise<void>;
+  /**
+   * Switch to a view. `date` applies to `today` only (section 53) and is
+   * ignored for the others. Leave it out, or pass null, for the real today.
+   */
+  loadView: (view: TaskView, date?: string | null) => Promise<void>;
   /** Re-read the current view. Called after every mutation. */
   refresh: () => Promise<void>;
 
@@ -130,6 +159,18 @@ interface TaskState {
   /** Flip a task between `todo` and `completed`. */
   toggleTaskCompletion: (id: number) => Promise<void>;
   deleteTask: (id: number) => Promise<void>;
+
+  /**
+   * Re-read the category list. Every category change below ends with this,
+   * so each select and row rendered from `categories` shows the new name the
+   * moment it is saved. A failed re-read is logged and leaves the old list:
+   * the write it follows has already landed.
+   */
+  loadCategories: () => Promise<void>;
+  createCategory: (input: NewTaskCategory) => Promise<TaskCategory>;
+  updateCategory: (id: number, patch: TaskCategoryUpdate) => Promise<TaskCategory>;
+  /** Tasks that used the category are kept, with no category. */
+  deleteCategory: (id: number) => Promise<void>;
 
   setQuickAddOpen: (open: boolean) => void;
   openQuickAdd: () => void;
@@ -173,6 +214,8 @@ const byId = (rules: TaskRecurrence[]): Record<number, TaskRecurrence> =>
 export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
   view: "today",
+  date: null,
+  repeats: [],
   categories: [],
   recurrences: {},
   isLoading: true,
@@ -181,15 +224,17 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   editingTaskId: null,
   revealedTaskId: null,
 
-  async loadView(view) {
+  async loadView(view, date = null) {
+    const day = view === "today" ? date : null;
     // Switching views clears the old list rather than showing it under the
-    // new heading while the read is in flight.
-    set({ view, tasks: [], isLoading: true, error: null });
-    await read(set, get, view);
+    // new heading while the read is in flight. Another day counts as another
+    // view here: yesterday's rows under tomorrow's heading would be wrong.
+    set({ view, date: day, tasks: [], repeats: [], isLoading: true, error: null });
+    await read(set, get, view, day);
   },
 
   async refresh() {
-    await read(set, get, get().view);
+    await read(set, get, get().view, get().date);
   },
 
   async createTask(input) {
@@ -230,6 +275,36 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     announceDataChanged("tasks");
   },
 
+  async loadCategories() {
+    try {
+      set({ categories: await listTaskCategories() });
+    } catch (cause) {
+      console.error("Could not re-read the task categories:", cause);
+    }
+  },
+
+  async createCategory(input) {
+    const created = await createTaskCategory(input);
+    await get().loadCategories();
+    return created;
+  },
+
+  async updateCategory(id, patch) {
+    const updated = await updateTaskCategory(id, patch);
+    await get().loadCategories();
+    return updated;
+  },
+
+  async deleteCategory(id) {
+    await deleteTaskCategory(id);
+    await get().loadCategories();
+    // The database has just set `category_id` to NULL on every task that used
+    // it (`ON DELETE SET NULL`), so the loaded rows are out of date too — here
+    // and in any other window holding them.
+    await get().refresh();
+    announceDataChanged("tasks");
+  },
+
   setQuickAddOpen: (open) => set({ isQuickAddOpen: open }),
   openQuickAdd: () => set({ isQuickAddOpen: true }),
   closeQuickAdd: () => set({ isQuickAddOpen: false }),
@@ -265,8 +340,13 @@ type Get = StoreApi<TaskState>["getState"];
  * A failed recurrence sync is logged rather than surfaced: the tasks that
  * already exist are still worth showing, and the sync is retried on the next
  * load anyway. A failed *list* is the error the view reports.
+ *
+ * A dated Today reads that one day's tasks instead of the carry-over view,
+ * with the same statuses, and asks the backend which repeats the day will
+ * get. The backend returns none for today or earlier, so that call makes no
+ * judgement of its own about the date.
  */
-async function read(set: Set, get: Get, view: TaskView): Promise<void> {
+async function read(set: Set, get: Get, view: TaskView, date: string | null): Promise<void> {
   try {
     await syncRecurringTasks();
   } catch (cause) {
@@ -274,27 +354,37 @@ async function read(set: Set, get: Get, view: TaskView): Promise<void> {
     console.error("Could not create today's recurring tasks:", cause);
   }
 
+  const filter = filterForView(view);
+  // Both keys, because another day of `today` is another view as far as a
+  // late read is concerned.
+  const isStale = () => get().view !== view || get().date !== date;
+
   try {
-    const [tasks, recurrences, categories] = await Promise.all([
-      listTasks(filterForView(view)),
+    const [tasks, repeats, recurrences, categories] = await Promise.all([
+      date === null ? listTasks(filter) : listTasksForDate(date, filter.statuses),
+      date === null ? [] : listRepeatsForDate(date),
       listTaskRecurrences(),
-      // Categories change rarely; re-read only until we have them.
-      get().categories.length > 0 ? get().categories : listTaskCategories(),
+      // Read only until we have them: every category change re-reads them
+      // itself (`loadCategories`), so a view read has nothing to add.
+      get().categories.length > 0 ? null : listTaskCategories(),
     ]);
 
     // A slower read for a view the user has already navigated away from must
     // not overwrite the newer one.
-    if (get().view !== view) return;
+    if (isStale()) return;
 
     set({
       tasks,
-      categories,
+      repeats,
+      // Only a list this read fetched is written back. Writing back the one
+      // it started from could put a category deleted mid-read back on screen.
+      ...(categories ? { categories } : {}),
       recurrences: byId(recurrences),
       isLoading: false,
       error: null,
     });
   } catch (cause) {
-    if (get().view !== view) return;
+    if (isStale()) return;
     set({ isLoading: false, error: String(cause) });
   }
 }
