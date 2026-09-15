@@ -348,6 +348,19 @@ fn toggle_widget(app: &AppHandle) {
     });
 }
 
+/// Shows or hides section 25's popup, off the main thread — for the reason
+/// [`toggle_widget`] is: an icon event arrives on the thread the event loop
+/// runs on, and the first summon has to build the popup's window, which
+/// deadlocks there.
+fn toggle_popup(app: &AppHandle) {
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = popup::toggle(&handle) {
+            crate::log_error!("[tray] could not toggle the popup: {error}");
+        }
+    });
+}
+
 fn handle_icon_event(app: &AppHandle, event: TrayIconEvent) {
     match event {
         // The pointer is on the icon and the menu has not opened yet: the
@@ -363,11 +376,7 @@ fn handle_icon_event(app: &AppHandle, event: TrayIconEvent) {
             button: MouseButton::Left,
             button_state: MouseButtonState::Up,
             ..
-        } => {
-            if let Err(error) = popup::toggle(app) {
-                crate::log_error!("[tray] could not toggle the popup: {error}");
-            }
-        }
+        } => toggle_popup(app),
 
         _ => {}
     }

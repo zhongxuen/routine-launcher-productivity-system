@@ -8,8 +8,15 @@
 use crate::services::popup;
 
 /// Shows the popup, building it on first use.
+///
+/// `async` for the reason `commands::widget::open_widget_window` is: a
+/// synchronous command runs on the main thread, and building a webview window
+/// there deadlocks the event loop — the builder waits for the loop, the loop
+/// waits for this call. The whole app stops answering, the popup's own close
+/// button included. On the async runtime the build is posted to the loop and
+/// waited on properly.
 #[tauri::command]
-pub fn open_popup_window(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn open_popup_window(app: tauri::AppHandle) -> Result<(), String> {
     popup::show(&app).map_err(|error| format!("Could not open the popup: {error}"))
 }
 
@@ -22,8 +29,11 @@ pub fn dismiss_popup_window(app: tauri::AppHandle) -> Result<(), String> {
 
 /// Flips the popup between shown and hidden, answering with whether it is now
 /// visible. This is what Stage 8's global shortcut binds to.
+///
+/// `async` for the reason [`open_popup_window`] is: half of what it does is
+/// build a window.
 #[tauri::command]
-pub fn toggle_popup_window(app: tauri::AppHandle) -> Result<bool, String> {
+pub async fn toggle_popup_window(app: tauri::AppHandle) -> Result<bool, String> {
     popup::toggle(&app).map_err(|error| format!("Could not toggle the popup: {error}"))
 }
 

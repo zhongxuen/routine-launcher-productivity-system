@@ -96,7 +96,11 @@ function ResultsBody({
   isScanning: boolean;
   hasScan: boolean;
 }) {
-  const groups = useDuplicateStore((state) => state.scan?.groups ?? []);
+  // Select the scan itself and default outside the selector. `?? []` inside it
+  // would hand zustand a new array on every read while `scan` is null, which
+  // it takes for a change — and re-renders until React gives up.
+  const scan = useDuplicateStore((state) => state.scan);
+  const groups = scan?.groups ?? [];
 
   // A spinner rather than skeleton cards, and this is the one place in the
   // app where that is the honest choice: hashing a folder tree can come back
