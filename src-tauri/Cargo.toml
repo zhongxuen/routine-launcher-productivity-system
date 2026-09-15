@@ -5,7 +5,7 @@ name = "routine-launcher"
 # section of README.md. The number the *installer* is stamped with comes from
 # `tauri.conf.json`; this one is the Rust crate's, and they are only ever the
 # same because that script writes both.
-version = "0.1.3"
+version = "0.1.4"
 description = "Routine launcher and productivity hub"
 authors = ["zhongxuen"]
 edition = "2021"
