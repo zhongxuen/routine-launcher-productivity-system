@@ -70,7 +70,7 @@
       "endpoints": [
         "https://github.com/zhongxuen/routine-launcher-productivity-system/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUyNkMzQjRFOUMxOEQ0MjUKUldRbDFCaWNUanRzNGxSRmwzb09TSkh0U2s3SlNQWjgrdXFsSlhKMzRQbjY5NjBQOEx1eXVBS0wK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkzMEFGQ0U4Q0FERTZGOUMKUldTY2I5N0s2UHdLazQvamZZTDZjTmlDUHdUaWdES3FCR04wVGw2V2FqTDQ5Mjd1SEdzWW9taW4K",
       "windows": {
         "installMode": "passive"
       }
