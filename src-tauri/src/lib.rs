@@ -332,6 +332,8 @@ pub fn run() {
             commands::settings::set_daily_settings,
             commands::daily_plans::get_daily_plan,
             commands::daily_plans::set_daily_plan,
+            commands::suggestions::list_suggestions,
+            commands::suggestions::dismiss_suggestion,
             commands::updates::get_check_updates_on_launch,
             commands::updates::set_check_updates_on_launch,
             commands::updates::check_for_update,

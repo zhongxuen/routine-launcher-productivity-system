@@ -8,6 +8,7 @@
 //! Today's Tasks
 //! 3 / 7 completed
 //! ☀️ Start My Day
+//! 🌙 Review My Day
 //!
 //! ────────────────
 //!
@@ -31,6 +32,8 @@
 //! `☀️ Start My Day` is not in section 27's drawing. It is section 21's
 //! morning flow, placed under today's count because that is the day it
 //! starts, and like the rest it only opens the app's own dialog.
+//! `🌙 Review My Day` is section 22's end-of-day review beside it, for the
+//! same reason.
 //!
 //! This module owns that menu, and lives beside [`super::popup`] rather than
 //! in `commands/` for the same reason: it is a window-and-OS surface the app
@@ -139,6 +142,7 @@ const HEADER_ID: &str = "tray:header";
 const TODAY_HEADING_ID: &str = "tray:today-heading";
 const TODAY_COUNT_ID: &str = "tray:today-count";
 const START_MY_DAY_ID: &str = "tray:start-my-day";
+const REVIEW_MY_DAY_ID: &str = "tray:review-my-day";
 const NO_ROUTINES_ID: &str = "tray:no-routines";
 const START_FOCUS_ID: &str = "tray:start-focus";
 const ADD_TASK_ID: &str = "tray:add-task";
@@ -165,6 +169,10 @@ pub enum TrayAction {
     /// Opens section 21's Start My Day dialog. The dialog, not the tray,
     /// decides which routine that is (section 52's start-of-day routine).
     StartMyDay,
+    /// Opens section 22's end-of-day review. Offered at any hour: the
+    /// dashboard only shows its button from the day's end, but someone
+    /// reaching for it in the tray has already decided the day is over.
+    ReviewMyDay,
     StartFocus,
     AddTask,
     OpenDashboard,
@@ -321,6 +329,7 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
 
     match id {
         START_MY_DAY_ID => dispatch(app, TrayAction::StartMyDay),
+        REVIEW_MY_DAY_ID => dispatch(app, TrayAction::ReviewMyDay),
         START_FOCUS_ID => dispatch(app, TrayAction::StartFocus),
         ADD_TASK_ID => dispatch(app, TrayAction::AddTask),
         // Not dispatched: section 83's widget is a window of its own, and
@@ -455,6 +464,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     push_item(app, &mut items, TODAY_HEADING_ID, "Today's Tasks", false)?;
     push_item(app, &mut items, TODAY_COUNT_ID, &today_line(app), false)?;
     push_item(app, &mut items, START_MY_DAY_ID, "☀️ Start My Day", true)?;
+    push_item(app, &mut items, REVIEW_MY_DAY_ID, "🌙 Review My Day", true)?;
     items.push(Box::new(PredefinedMenuItem::separator(app)?));
 
     let routines = with_db(app, |conn| routines::top_by_use(conn, MAX_TRAY_ROUTINES))
@@ -667,6 +677,7 @@ mod tests {
             r#"{"kind":"launch-routine","routine_id":7}"#
         );
         assert_eq!(json(TrayAction::StartMyDay), r#"{"kind":"start-my-day"}"#);
+        assert_eq!(json(TrayAction::ReviewMyDay), r#"{"kind":"review-my-day"}"#);
         assert_eq!(json(TrayAction::StartFocus), r#"{"kind":"start-focus"}"#);
         assert_eq!(json(TrayAction::AddTask), r#"{"kind":"add-task"}"#);
         assert_eq!(

@@ -18,6 +18,7 @@ import DayNav from "./DayNav";
 import PlanToday from "./PlanToday";
 import RepeatsSection from "./RepeatsSection";
 import TaskSection from "./TaskSection";
+import TaskSuggestion from "./TaskSuggestion";
 import TaskViewBody from "./TaskViewBody";
 import TaskViewHeader from "./TaskViewHeader";
 
@@ -66,6 +67,9 @@ function emptyCopy(offset: number, heading: string): { title: string; hint?: str
  * and marks the tasks picked there. Other days do not: the plan is for the
  * day being worked through, and a past day's picks are history rather than
  * something to act on.
+ *
+ * Section 55's suggestions ("Make it recurring?", "Update the estimate?") sit
+ * as one quiet line under the heading, on today's page only.
  */
 function TasksToday() {
   const { date, dayKey, step, goToToday } = useDayParam();
@@ -108,6 +112,8 @@ function TasksToday() {
           />
         }
       />
+
+      {isToday && <TaskSuggestion tasks={tasks} />}
 
       {isToday && (
         <PlanToday tasks={tasks} tasksLoading={isLoading} tasksError={error} plan={plan} />

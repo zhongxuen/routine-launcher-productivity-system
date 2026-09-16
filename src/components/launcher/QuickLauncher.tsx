@@ -4,7 +4,11 @@ import { Loader2, Search } from "lucide-react";
 import ErrorState from "@/components/common/states/ErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useWindowSync } from "@/hooks/useWindowSync";
-import { requestFocusSession, requestStartMyDay } from "@/lib/launcher-events";
+import {
+  requestFocusSession,
+  requestReviewMyDay,
+  requestStartMyDay,
+} from "@/lib/launcher-events";
 import { runCounts } from "@/lib/routine-utils";
 import { todayKey } from "@/lib/task-utils";
 import { cn } from "@/lib/utils";
@@ -296,6 +300,11 @@ function QuickLauncher() {
         // it hands over to and the planning session's clock all live in the
         // main window.
         requestStartMyDay();
+        void focusMainWindow();
+        void dismissQuickLauncher();
+        return;
+      case "review-my-day":
+        requestReviewMyDay();
         void focusMainWindow();
         void dismissQuickLauncher();
     }

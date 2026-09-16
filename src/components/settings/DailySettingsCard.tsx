@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { formatLeadTime } from "@/services/notificationService";
 import { useRoutineStore } from "@/stores/routineStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -72,17 +73,17 @@ const optionalValue = (id: number | null): string => (id === null ? NONE : Strin
  * ```
  *
  * The one card on this page with a Save button. The others each hold a single
- * switch that stands on its own; these nine are checked together — the day
+ * switch that stands on its own; these ten are checked together — the day
  * has to end after it starts — so they are edited as a form and stored in one
  * write, and a refusal is the backend's own sentence under the fields.
  *
  * Saved values reach their consumers through the settings store: Custom's
  * length in the focus timer, the quick-add form's priority, the reminder the
  * edit dialog suggests, the quests on the dashboard and the week on the
- * Statistics tab, the start-of-day routine to Start My Day (section 21), and
- * the day's hours to Plan Today's time left (section 20). The end-of-day
- * routine is saved for the end-of-day flow, and the card says so rather than
- * implying it already does something.
+ * Statistics tab, the start-of-day routine to Start My Day (section 21), the
+ * day's hours to Plan Today's time left (section 20), and the day's end and
+ * the end-of-day routine to the end-of-day review (section 22), along with
+ * the switch for its one notification.
  */
 function DailySettingsCard() {
   const daily = useSettingsStore((state) => state.daily);
@@ -210,11 +211,23 @@ function DailySettingsCard() {
                   onChange={(id) => update("endOfDayRoutineId", id)}
                 />
               </Row>
+              <Row
+                id="daily-end-notification"
+                label="End-of-day notification"
+                hint="One notification at the end of the day, offering the review."
+              >
+                <Switch
+                  id="daily-end-notification"
+                  checked={draft.endOfDayNotification}
+                  onCheckedChange={(checked) => update("endOfDayNotification", checked)}
+                />
+              </Row>
               <p className="text-xs text-muted-foreground">
                 Start My Day opens the start-of-day routine, then a 10-minute planning session.
                 Plan Today, on Tasks &rsaquo; Today, sets your estimated work against the hours
-                left in the day. The end-of-day routine is saved for End My Day, which is not built
-                yet.
+                left in the day. From the end of the day, the dashboard offers Review My Day: the
+                day's figures, the tasks still open, and End My Day to open the end-of-day routine.
+                It never opens by itself.
               </p>
             </Group>
 

@@ -58,6 +58,14 @@ use super::xp::{self, StreakProgress};
 /// that the grid stays readable at the size a tab panel gives it.
 const HISTORY_DAYS: i64 = 28;
 
+/// How many weeks of trend [`productivity_stats`] reads back, the current
+/// week included (section 82's "productivity trends").
+///
+/// Eight, so the chart covers about two months: enough for a change of habit
+/// to show as a slope rather than a blip, and few enough that every bar keeps
+/// room for its figures.
+const TREND_WEEKS: i64 = 8;
+
 // ---------------------------------------------------------------------------
 // Payloads
 // ---------------------------------------------------------------------------
@@ -120,6 +128,30 @@ pub struct PeriodStats {
     pub routine_launches: i64,
 }
 
+/// One week of section 82's trend: its dates and, if the week is measured,
+/// its totals.
+///
+/// `totals` is `None` for a week that ended before the first recorded
+/// activity — the first completed focus session, completed task or routine
+/// launch the database holds. Those weeks are not weeks of nothing; they are
+/// weeks the app has no record of, and a zero there would draw a slump that
+/// never happened. The same dash-not-zero rule as
+/// [`RoutineStatistics::average_session_seconds`]. A week on or after that
+/// first activity is measured, so a quiet week later on is a real zero.
+///
+/// The totals are a [`PeriodStats`] for the week, so a past week's
+/// `tasks_total` follows the same rule as THIS WEEK's: what was completed in
+/// it, plus what is still open and was due by its end.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrendWeek {
+    /// First local day of the week, `YYYY-MM-DD`.
+    pub start: String,
+    /// Last local day of the week, inclusive.
+    pub end: String,
+    pub totals: Option<PeriodStats>,
+}
+
 /// How often one routine was launched inside a window (section 82's "routine
 /// usage", and the "Most used routine" line of section 36).
 ///
@@ -163,6 +195,10 @@ pub struct ProductivityStats {
     /// The last [`HISTORY_DAYS`] days ending today, oldest first — section
     /// 82's "streak history" as a calendar of days that counted.
     pub streak_history: Vec<DayStats>,
+    /// The last [`TREND_WEEKS`] weeks, oldest first, ending with the current
+    /// one — so the last entry's totals are `week`. Weeks start on the same
+    /// day as `week` does.
+    pub week_trend: Vec<TrendWeek>,
 }
 
 /// Section 33's five figures for one routine, all of them measured.
@@ -202,11 +238,11 @@ pub fn productivity_stats(conn: &Connection) -> ServiceResult<ProductivityStats>
 /// [`productivity_stats`] for a given window, which is what lets the tests
 /// pin the date.
 fn stats_for(conn: &Connection, window: &Window) -> ServiceResult<ProductivityStats> {
-    // One pass over the widest range anyone here asks about — the history
-    // starts before the week does, and the week can end after today — then
-    // sliced. The alternative is three date-bucketed queries that could each
+    // One pass over the widest range anyone here asks about — the trend
+    // starts before the history does, and the week can end after today — then
+    // sliced. The alternative is several date-bucketed queries that could each
     // land on a different side of midnight.
-    let days = days_between(conn, &window.history_start, &window.week_end)?;
+    let days = days_between(conn, &window.trend_start, &window.week_end)?;
     let slice = |start: &str, end: &str| -> Vec<DayStats> {
         days.iter()
             .filter(|day| day.date.as_str() >= start && day.date.as_str() <= end)
@@ -234,6 +270,7 @@ fn stats_for(conn: &Connection, window: &Window) -> ServiceResult<ProductivitySt
         routine_usage: routine_usage(conn, &window.week_start, &window.week_end)?,
         streak: xp::streak(conn)?,
         streak_history,
+        week_trend: week_trend(conn, &days)?,
     })
 }
 
@@ -248,6 +285,9 @@ struct Window {
     week_start: String,
     week_end: String,
     history_start: String,
+    /// The first day of the oldest trend week: [`TREND_WEEKS`] - 1 weeks
+    /// before `week_start`, so the trend ends on the current week.
+    trend_start: String,
 }
 
 impl Window {
@@ -265,20 +305,27 @@ impl Window {
     /// and `weekday N` then moves forward to the first such day at or after it
     /// — which is this week's. Asking for `weekday N` on its own would answer
     /// with *next* week's whenever today is not that day.
+    ///
+    /// All of it is `date()` arithmetic on a calendar date with no time of
+    /// day, so a daylight-saving change inside the range cannot shorten or
+    /// lengthen a week: there is no 23- or 25-hour day for it to land on.
     fn on(conn: &Connection, today: &str, week_start: WeekStart) -> ServiceResult<Self> {
         let back = format!("-{} days", HISTORY_DAYS - 1);
+        let trend_back = format!("-{} days", (TREND_WEEKS - 1) * 7);
 
         Ok(conn.query_row(
             "SELECT date(?1, '-6 days', ?2) AS week_start,
                     date(?1, '-6 days', ?2, '+6 days') AS week_end,
-                    date(?1, ?3) AS history_start",
-            params![today, week_start.sqlite_modifier(), back],
+                    date(?1, ?3) AS history_start,
+                    date(?1, '-6 days', ?2, ?4) AS trend_start",
+            params![today, week_start.sqlite_modifier(), back, trend_back],
             |row| {
                 Ok(Self {
                     today: today.to_owned(),
                     week_start: row.get("week_start")?,
                     week_end: row.get("week_end")?,
                     history_start: row.get("history_start")?,
+                    trend_start: row.get("trend_start")?,
                 })
             },
         )?)
@@ -379,6 +426,58 @@ fn period(
         tasks_total: tasks_completed + outstanding,
         routine_launches: days.iter().map(|day| day.routine_launches).sum(),
     })
+}
+
+/// Section 82's trend: the days from the oldest trend week to the end of the
+/// current one, cut into weeks.
+///
+/// `days` starts on a week start and ends on a week end (see [`Window`]), so
+/// cutting it into sevens gives the weeks exactly — no second round of date
+/// arithmetic that could disagree with the first.
+fn week_trend(conn: &Connection, days: &[DayStats]) -> ServiceResult<Vec<TrendWeek>> {
+    let first_activity = first_activity_date(conn)?;
+    let days = &days[days.len().saturating_sub((TREND_WEEKS * 7) as usize)..];
+
+    days.chunks_exact(7)
+        .map(|week| {
+            let start = &week[0].date;
+            let end = &week[6].date;
+            let measured = first_activity
+                .as_deref()
+                .is_some_and(|first| end.as_str() >= first);
+
+            Ok(TrendWeek {
+                start: start.clone(),
+                end: end.clone(),
+                totals: if measured {
+                    Some(period(conn, start, end, week)?)
+                } else {
+                    None
+                },
+            })
+        })
+        .collect()
+}
+
+/// The local day of the earliest thing the statistics count — a completed
+/// focus session, a completed task or a routine launch — or `None` if there
+/// is none yet. The same three things section 46 counts a day by.
+fn first_activity_date(conn: &Connection) -> ServiceResult<Option<String>> {
+    Ok(conn.query_row(
+        "SELECT MIN(day) FROM (
+             SELECT MIN(DATE(ended_at, 'localtime')) AS day
+               FROM focus_sessions
+              WHERE completed = 1 AND ended_at IS NOT NULL
+             UNION ALL
+             SELECT MIN(DATE(completed_at, 'localtime'))
+               FROM tasks
+              WHERE status = 'completed' AND completed_at IS NOT NULL
+             UNION ALL
+             SELECT MIN(DATE(launched_at, 'localtime')) FROM routine_launches
+         )",
+        [],
+        |row| row.get(0),
+    )?)
 }
 
 /// The week's best day, by focus time (section 36's "Most productive day").
@@ -880,6 +979,181 @@ mod tests {
 
         // The streak calendar is the last four weeks either way.
         assert_eq!(monday_week.streak_history, sunday_week.streak_history);
+    }
+
+    // -----------------------------------------------------------------------
+    // Section 82's trend across weeks
+    // -----------------------------------------------------------------------
+
+    /// A completed focus session and a completed task at *local* `at`
+    /// (`YYYY-MM-DD HH:MM:SS`), stored as the UTC the app writes.
+    ///
+    /// Converting a fixed local time rather than offsetting from noon is what
+    /// lets these tests pin a time minutes either side of midnight: SQLite
+    /// applies whichever offset was in force at that instant, so a fixture on
+    /// the night of a daylight-saving change gets that night's offset.
+    fn work_at(conn: &Connection, at: &str, seconds: i64) {
+        conn.execute(
+            "INSERT INTO focus_sessions (started_at, ended_at, duration_seconds, completed)
+             VALUES (datetime(?1, 'utc'), datetime(?1, 'utc'), ?2, 1)",
+            params![at, seconds],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tasks (title, status, completed_at)
+             VALUES ('Done', 'completed', datetime(?1, 'utc'))",
+            params![at],
+        )
+        .unwrap();
+    }
+
+    /// The stats as they would read on the local date `today`.
+    fn stats_on(conn: &Connection, today: &str, start: WeekStart) -> ProductivityStats {
+        stats_for(conn, &Window::on(conn, today, start).unwrap()).unwrap()
+    }
+
+    /// The trend week whose first day is `start`.
+    fn trend_week<'a>(stats: &'a ProductivityStats, start: &str) -> &'a TrendWeek {
+        stats
+            .week_trend
+            .iter()
+            .find(|week| week.start == start)
+            .unwrap_or_else(|| panic!("no trend week starting {start}"))
+    }
+
+    /// `date` moved by a SQLite modifier such as `'+6 days'`.
+    fn shifted(conn: &Connection, date: &str, modifier: &str) -> String {
+        conn.query_row("SELECT date(?1, ?2)", params![date, modifier], |row| row.get(0))
+            .unwrap()
+    }
+
+    /// Every trend week is seven calendar days starting on `weekday` (`"1"`
+    /// Monday, `"0"` Sunday), and each starts the day after the last ended.
+    fn assert_whole_weeks(conn: &Connection, stats: &ProductivityStats, weekday: &str) {
+        assert_eq!(stats.week_trend.len(), TREND_WEEKS as usize);
+        for week in &stats.week_trend {
+            assert_eq!(weekday_of(conn, &week.start), weekday, "{week:?}");
+            assert_eq!(week.end, shifted(conn, &week.start, "+6 days"), "{week:?}");
+        }
+        for pair in stats.week_trend.windows(2) {
+            assert_eq!(pair[1].start, shifted(conn, &pair[0].end, "+1 day"));
+        }
+    }
+
+    #[test]
+    fn the_trend_is_eight_weeks_ending_with_this_one() {
+        let conn = conn();
+        a_session(&conn, 20 * 60, 0, None);
+
+        let stats = productivity_stats(&conn).unwrap();
+        let last = stats.week_trend.last().unwrap();
+
+        assert_eq!(stats.week_trend.len(), TREND_WEEKS as usize);
+        assert_eq!(last.start, stats.week.start);
+        assert_eq!(last.end, stats.week.end);
+        assert_eq!(last.totals.as_ref(), Some(&stats.week), "the same figures as THIS WEEK");
+    }
+
+    #[test]
+    fn weeks_before_the_first_activity_are_empty_and_later_quiet_weeks_are_zero() {
+        let conn = conn();
+        assert!(
+            stats_on(&conn, "2026-09-16", WeekStart::Monday)
+                .week_trend
+                .iter()
+                .all(|week| week.totals.is_none()),
+            "nothing recorded yet, so no week is measured"
+        );
+
+        // First activity on Wednesday 2026-08-19, in the week of 17 August.
+        work_at(&conn, "2026-08-19 12:00:00", 600);
+        let stats = stats_on(&conn, "2026-09-16", WeekStart::Monday);
+
+        assert_eq!(stats.week_trend[0].start, "2026-07-27");
+        assert_eq!(trend_week(&stats, "2026-08-10").totals, None, "the week before");
+        let first = trend_week(&stats, "2026-08-17").totals.as_ref().unwrap();
+        assert_eq!(first.focus_seconds, 600);
+        assert_eq!(first.tasks_completed, 1);
+
+        let quiet = trend_week(&stats, "2026-08-24").totals.as_ref();
+        assert_eq!(quiet.map(|week| week.focus_seconds), Some(0), "measured, and zero");
+    }
+
+    #[test]
+    fn work_either_side_of_a_week_boundary_lands_in_its_own_week() {
+        let conn = conn();
+        let coding = a_routine(&conn, "Coding");
+
+        // Sunday 2026-09-13 ends a Monday week and starts a Sunday one;
+        // Monday 2026-09-14 starts the next Monday week.
+        work_at(&conn, "2026-09-12 23:59:00", 60);
+        work_at(&conn, "2026-09-13 23:30:00", 25 * 60);
+        work_at(&conn, "2026-09-14 00:30:00", 50 * 60);
+        conn.execute(
+            "INSERT INTO routine_launches (routine_id, launched_at)
+             VALUES (?1, datetime('2026-09-14 00:00:00', 'utc'))",
+            params![coding],
+        )
+        .unwrap();
+
+        let monday = stats_on(&conn, "2026-09-16", WeekStart::Monday);
+        assert_whole_weeks(&conn, &monday, "1");
+        let before = trend_week(&monday, "2026-09-07").totals.as_ref().unwrap();
+        let after = trend_week(&monday, "2026-09-14").totals.as_ref().unwrap();
+        assert_eq!((before.focus_seconds, before.tasks_completed), (26 * 60, 2));
+        assert_eq!(before.routine_launches, 0);
+        assert_eq!((after.focus_seconds, after.tasks_completed), (50 * 60, 1));
+        assert_eq!(after.routine_launches, 1, "midnight belongs to the new week");
+
+        let sunday = stats_on(&conn, "2026-09-16", WeekStart::Sunday);
+        assert_whole_weeks(&conn, &sunday, "0");
+        let before = trend_week(&sunday, "2026-09-06").totals.as_ref().unwrap();
+        let after = trend_week(&sunday, "2026-09-13").totals.as_ref().unwrap();
+        assert_eq!((before.focus_seconds, before.tasks_completed), (60, 1));
+        assert_eq!((after.focus_seconds, after.tasks_completed), (75 * 60, 2));
+        assert_eq!(after.routine_launches, 1);
+    }
+
+    /// The four 2026 daylight-saving changes most users meet — Europe's on
+    /// 29 March and 25 October, the US's on 8 March and 1 November — all
+    /// happen in the small hours of a Sunday, the last day of a Monday week.
+    /// So the first minutes of that week are at one UTC offset and its last
+    /// minutes at another, and the week boundary either side is where a
+    /// timestamp-based week (seven times 86,400 seconds) would slip an hour.
+    ///
+    /// The week arithmetic is checked in any time zone. The fixtures cross a
+    /// real change of offset only when the machine running the tests
+    /// observes one of these; elsewhere the same assertions still hold the
+    /// boundaries, at a constant offset.
+    #[test]
+    fn weeks_stay_seven_days_across_a_daylight_saving_change() {
+        for change in ["2026-03-08", "2026-03-29", "2026-10-25", "2026-11-01"] {
+            let conn = conn();
+            let week_start = shifted(&conn, change, "-6 days");
+            let next_monday = shifted(&conn, change, "+1 day");
+            let today = shifted(&conn, change, "+3 days");
+
+            work_at(&conn, &format!("{week_start} 00:30:00"), 10 * 60);
+            work_at(&conn, &format!("{change} 23:30:00"), 25 * 60);
+            work_at(&conn, &format!("{next_monday} 00:30:00"), 50 * 60);
+
+            let monday = stats_on(&conn, &today, WeekStart::Monday);
+            assert_whole_weeks(&conn, &monday, "1");
+            assert_whole_weeks(&conn, &stats_on(&conn, &today, WeekStart::Sunday), "0");
+
+            let spanning = trend_week(&monday, &week_start);
+            assert_eq!(spanning.end, change, "the change is the week's last day");
+            assert_eq!(
+                spanning.totals.as_ref().map(|week| week.focus_seconds),
+                Some(35 * 60),
+                "{change}: both ends of the week, at their own offsets"
+            );
+            assert_eq!(
+                trend_week(&monday, &next_monday).totals.as_ref().map(|week| week.focus_seconds),
+                Some(50 * 60),
+                "{change}: Monday's first hour opens the next week"
+            );
+        }
     }
 
     // -----------------------------------------------------------------------

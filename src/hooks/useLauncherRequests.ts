@@ -1,6 +1,7 @@
 /**
  * The main window's half of the quick launcher's `⏱ Start Focus`
- * (development-plan.md section 28), and of its Start My Day (section 21).
+ * (development-plan.md section 28), and of its Start My Day (section 21) and
+ * Review My Day (section 22).
  *
  * The launcher does everything else where it stands — see
  * `src/components/launcher/QuickLauncher.tsx` — because everything else is a
@@ -27,7 +28,11 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 
 import { focusLengthCaption, FOCUS_TIMER_PATH } from "@/hooks/useStartFocus";
-import { onFocusSessionRequested, onStartMyDayRequested } from "@/lib/launcher-events";
+import {
+  onFocusSessionRequested,
+  onReviewMyDayRequested,
+  onStartMyDayRequested,
+} from "@/lib/launcher-events";
 import { useAppStore } from "@/stores/appStore";
 import { useFocusStore } from "@/stores/focusStore";
 
@@ -61,6 +66,14 @@ export function useLauncherRequests(): void {
     void onStartMyDayRequested(() => {
       navigate(DASHBOARD_PATH);
       useAppStore.getState().requestStartMyDay();
+    })
+      .then(keep)
+      .catch(report);
+
+    // Section 22's review, mounted beside it on the dashboard.
+    void onReviewMyDayRequested(() => {
+      navigate(DASHBOARD_PATH);
+      useAppStore.getState().requestReviewMyDay();
     })
       .then(keep)
       .catch(report);

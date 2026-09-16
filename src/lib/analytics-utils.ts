@@ -16,7 +16,7 @@ import { format } from "date-fns";
 
 import { formatFocusTime } from "@/lib/routine-utils";
 import { parseDateKey } from "@/lib/task-utils";
-import type { DayStats, PeriodStats } from "@/types/analytics";
+import type { DayStats, PeriodStats, TrendWeek } from "@/types/analytics";
 import type { Task } from "@/types/task";
 
 /**
@@ -86,6 +86,35 @@ export function weekRange({ start, end }: PeriodStats): string {
 export function focusBarFraction(day: DayStats, days: DayStats[]): number {
   const busiest = days.reduce((most, candidate) => Math.max(most, candidate.focusSeconds), 0);
   return busiest <= 0 ? 0 : day.focusSeconds / busiest;
+}
+
+/**
+ * How tall a week's bar is, from 0 to 1, relative to the busiest measured
+ * week — {@link focusBarFraction} for the trend across weeks. A week with no
+ * record behind it has no height at all, and does not count towards the
+ * busiest.
+ */
+export function weekBarFraction(week: TrendWeek, weeks: TrendWeek[]): number {
+  if (!week.totals) return 0;
+  const busiest = weeks.reduce(
+    (most, candidate) => Math.max(most, candidate.totals?.focusSeconds ?? 0),
+    0,
+  );
+  return busiest <= 0 ? 0 : week.totals.focusSeconds / busiest;
+}
+
+/** What one week of the trend says on hover. */
+export function weekTooltip(week: TrendWeek, isCurrent: boolean): string {
+  const range = `${shortDate(week.start)} – ${shortDate(week.end)}`;
+  if (!week.totals) return `${range} — before your first recorded activity`;
+
+  const { focusSeconds, tasksCompleted, tasksTotal, routineLaunches } = week.totals;
+  const parts = [
+    `${formatFocusTime(focusSeconds)} focused`,
+    `${tasksCompleted} / ${tasksTotal} tasks`,
+    `${routineLaunches} routine${routineLaunches === 1 ? "" : "s"}`,
+  ];
+  return `${range}${isCurrent ? " (so far)" : ""} — ${parts.join(", ")}`;
 }
 
 /**

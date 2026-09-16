@@ -14,7 +14,8 @@
    `motionStore` puts the class there; every animation below reads it. */
 @custom-variant reduce-motion (&:is(.reduce-motion *));
 
-:root {
+:root,
+[data-accent-preview="default"] {
   --radius: 0.625rem;
 
   --background: oklch(1 0 0);
@@ -67,7 +68,8 @@
   --focus-break: oklch(0.511 0.096 186.391);
 }
 
-.dark {
+.dark,
+.dark [data-accent-preview="default"] {
   --background: oklch(0.141 0.005 285.823);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.21 0.006 285.885);
@@ -110,6 +112,101 @@
   --status-cancelled: oklch(0.602 0.015 285.938);
 
   --focus-break: oklch(0.777 0.152 181.912);
+}
+
+/*
+ * Accent themes (development-plan.md sections 48, 84, 92 Tier 4).
+ *
+ * An accent is a `data-accent` attribute on <html>, next to the `dark` class,
+ * and it replaces exactly three tokens: `--primary`, the text drawn on it, and
+ * `--ring`. Everything neutral — surfaces, borders, muted text — and every
+ * token that *means* something (priority, status, destructive, a focus break)
+ * stays as it is, so no accent can make an overdue task look calm or a delete
+ * button look like a save. The default accent is the absence of the
+ * attribute, which is why it needs no block here. `themeStore` writes it.
+ *
+ * Each palette is held to the same bar as the base tokens (see "Theming" in
+ * the README), in both themes:
+ *
+ * - 4.5:1 for text: `--primary-foreground` on `--primary`, including the 90%
+ *   hover state, and `--primary` as text on page, card, `--muted` and the 10%
+ *   tint behind an unlocked achievement.
+ * - 3:1 for indicators: `--ring` on page, card and `--muted`; `--primary` as a
+ *   fill (a ticked checkbox, a switch, a chart bar) on the same three, against
+ *   the 20% track of a progress bar, and under a switch's thumb.
+ *
+ * The light theme is the binding one again: `--primary` has to be dark enough
+ * to carry white text *and* to be read as text on white, which is why these
+ * hues sit near L 0.5 rather than at their most vivid. Hues also keep clear of
+ * the semantic ones — no red (destructive, urgent), no teal (a focus break).
+ *
+ * Every value is inside sRGB, so the numbers that were measured are the ones
+ * the webview paints rather than a gamut-mapped approximation of them.
+ *
+ * Specificity: `:root[data-accent]` and `.dark[data-accent]` are equal, so
+ * the dark block wins by coming second — and both must set the same three
+ * tokens, or a light value would leak into dark past the plain `.dark` rule.
+ *
+ * `data-accent-preview` is the swatch beside each name in Settings →
+ * Appearance. It has to show its own palette whatever accent is on <html>,
+ * so every block — the two base ones included, for the default — also
+ * declares its tokens on that element. The palette is then written once, and
+ * a swatch cannot drift from what picking it does.
+ */
+:root[data-accent="ocean"],
+[data-accent-preview="ocean"] {
+  --primary: oklch(0.5 0.12 250);
+  --primary-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.56 0.13 250);
+}
+
+.dark[data-accent="ocean"],
+.dark [data-accent-preview="ocean"] {
+  --primary: oklch(0.8 0.09 250);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --ring: oklch(0.74 0.11 250);
+}
+
+:root[data-accent="forest"],
+[data-accent-preview="forest"] {
+  --primary: oklch(0.48 0.1 145);
+  --primary-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.56 0.11 145);
+}
+
+.dark[data-accent="forest"],
+.dark [data-accent-preview="forest"] {
+  --primary: oklch(0.8 0.12 145);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --ring: oklch(0.74 0.13 145);
+}
+
+:root[data-accent="iris"],
+[data-accent-preview="iris"] {
+  --primary: oklch(0.5 0.14 295);
+  --primary-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.56 0.14 295);
+}
+
+.dark[data-accent="iris"],
+.dark [data-accent-preview="iris"] {
+  --primary: oklch(0.8 0.09 295);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --ring: oklch(0.74 0.12 295);
+}
+
+:root[data-accent="copper"],
+[data-accent-preview="copper"] {
+  --primary: oklch(0.49 0.11 50);
+  --primary-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.58 0.12 50);
+}
+
+.dark[data-accent="copper"],
+.dark [data-accent-preview="copper"] {
+  --primary: oklch(0.8 0.1 60);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --ring: oklch(0.74 0.12 60);
 }
 
 @theme inline {

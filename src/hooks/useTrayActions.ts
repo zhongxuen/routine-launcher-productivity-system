@@ -7,6 +7,7 @@
  *
  * ```text
  * ☀️ Start My Day ─▶ appStore.requestStartMyDay (§21's dialog, on the dashboard)
+ * 🌙 Review My Day ─▶ appStore.requestReviewMyDay (§22's dialog, on the dashboard)
  * 🚀 Coding      ─▶ routineStore.launchRoutine  (§32's checklist panel)
  * ⏱ Start Focus  ─▶ startFocusFor               (§19's clock, on the picked preset)
  * + Add Task     ─▶ taskStore.openQuickAdd      (§16's dialog)
@@ -115,6 +116,12 @@ async function runTrayAction(
       // to, so that is where it opens.
       navigate(DASHBOARD_PATH);
       useAppStore.getState().requestStartMyDay();
+      return;
+    }
+
+    case "review-my-day": {
+      navigate(DASHBOARD_PATH);
+      useAppStore.getState().requestReviewMyDay();
       return;
     }
 

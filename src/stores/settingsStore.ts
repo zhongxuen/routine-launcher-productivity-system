@@ -44,7 +44,7 @@ interface SettingsState {
   ensureDaily: () => Promise<DailySettings>;
 
   /**
-   * Saves all nine, and tells the other windows. Rejects with the backend's
+   * Saves all ten, and tells the other windows. Rejects with the backend's
    * sentence when a field is refused, leaving `daily` as it was.
    */
   saveDaily: (next: DailySettings) => Promise<DailySettings>;

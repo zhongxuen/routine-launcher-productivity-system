@@ -1,8 +1,10 @@
 import BasicStatistics from "@/components/dashboard/BasicStatistics";
 import DailyQuests from "@/components/dashboard/DailyQuests";
+import EndOfDayDialog from "@/components/dashboard/EndOfDayDialog";
 import FocusWidget from "@/components/dashboard/FocusWidget";
 import ProgressWidget from "@/components/dashboard/ProgressWidget";
 import QuickStart from "@/components/dashboard/QuickStart";
+import ReviewMyDayButton from "@/components/dashboard/ReviewMyDayButton";
 import StartMyDayButton from "@/components/dashboard/StartMyDayButton";
 import StartMyDayDialog from "@/components/dashboard/StartMyDayDialog";
 import TodaysTasks from "@/components/dashboard/TodaysTasks";
@@ -27,7 +29,8 @@ function greetingFor(date: Date): string {
  * loading and error states, and the dialogs it can raise: `QuickStart`
  * mounts the launch panel. (Start My Day's dialog is mounted here rather than
  * by its button, because the tray and the quick launcher open it too, and the
- * button is not drawn once the day has started.) (Quick-add is the exception — `TodaysTasks` raises
+ * button is not drawn once the day has started. The end-of-day review's dialog
+ * is mounted here for the same reasons.) (Quick-add is the exception — `TodaysTasks` raises
  * the one the app shell mounts for section 16's `Ctrl+N`.) That is why the
  * dashboard can read from the task, routine, focus and progress stores at
  * once without a single fetch of its own, and why a widget's Stage 9 rewrite
@@ -58,6 +61,14 @@ function Dashboard() {
           after navigating here. */}
       <StartMyDayButton now={now} />
       <StartMyDayDialog />
+
+      {/* Section 22's end-of-day review: offered from the day's end in
+          Settings > Daily, never opened on its own. Mounted here for the same
+          reasons as Start My Day's — the tray and the quick launcher open it
+          after navigating here, and End my day hands over to QuickStart's
+          launch panel. */}
+      <ReviewMyDayButton now={now} />
+      <EndOfDayDialog />
 
       <div className="flex flex-col gap-2">
         <div className="flex items-baseline justify-between gap-4">

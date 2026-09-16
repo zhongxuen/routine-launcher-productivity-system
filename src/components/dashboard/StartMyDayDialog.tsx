@@ -4,15 +4,14 @@ import {
   Check,
   LayoutDashboard,
   Minus,
-  Plus,
   Settings2,
   Sun,
   Timer,
   type LucideIcon,
 } from "lucide-react";
-import { toast } from "sonner";
 
 import InlineError from "@/components/common/states/InlineError";
+import CreateDailyRoutineButton from "@/components/dashboard/CreateDailyRoutineButton";
 import RoutineIcon from "@/components/routines/RoutineIcon";
 import { Button } from "@/components/ui/button";
 import {
@@ -198,7 +197,11 @@ function StartMyDayBody({ onClose }: { onClose: () => void }) {
               <Settings2 />
               Choose a routine
             </Button>
-            <CreateFromTemplateButton onClose={onClose} />
+            <CreateDailyRoutineButton
+              template={START_MY_DAY_TEMPLATE}
+              field="startOfDayRoutineId"
+              onClose={onClose}
+            />
           </>
         )}
       </DialogFooter>
@@ -480,68 +483,6 @@ function NoRoutine({
       timer.
     </p>
   );
-}
-
-/**
- * Creates the Start My Day routine, makes it the start-of-day routine, and
- * opens it in the builder — the same hand-off the Templates tab makes, for the
- * same reason: its targets are guesses, and the moment to check them is
- * before the first launch.
- *
- * Setting it as the start-of-day routine is the point of pressing this here
- * rather than on the Templates tab. It is only done when the stored settings
- * were actually read, since saving writes all nine and a failed read would
- * otherwise overwrite them with defaults.
- */
-function CreateFromTemplateButton({ onClose }: { onClose: () => void }) {
-  const navigate = useNavigate();
-  const createRoutine = useRoutineStore((state) => state.createRoutine);
-  const [isCreating, setIsCreating] = useState(false);
-
-  async function handleCreate() {
-    setIsCreating(true);
-
-    let created: RoutineWithActions;
-    try {
-      created = await createRoutine(START_MY_DAY_TEMPLATE.routine);
-    } catch (cause) {
-      setIsCreating(false);
-      toast.error("Could not add the Start My Day routine", { description: String(cause) });
-      return;
-    }
-
-    const linked = await makeStartOfDayRoutine(created.id);
-
-    toast.success(`${created.name} added`, {
-      description: linked
-        ? "It is your start-of-day routine now. Check the targets match your setup, then save."
-        : "Check the targets match your setup, then choose it in Settings > Daily.",
-    });
-    onClose();
-    navigate(`/routines/create?routine=${created.id}`);
-  }
-
-  return (
-    <Button disabled={isCreating} onClick={() => void handleCreate()}>
-      <Plus />
-      {isCreating ? "Adding…" : "Create from template"}
-    </Button>
-  );
-}
-
-/** Saves `routineId` as the start-of-day routine, answering whether it was. */
-async function makeStartOfDayRoutine(routineId: number): Promise<boolean> {
-  const settings = useSettingsStore.getState();
-  const daily = await settings.ensureDaily();
-  if (!useSettingsStore.getState().hasLoaded) return false;
-
-  try {
-    await settings.saveDaily({ ...daily, startOfDayRoutineId: routineId });
-    return true;
-  } catch (cause) {
-    console.error("Could not set the start-of-day routine:", cause);
-    return false;
-  }
 }
 
 export default StartMyDayDialog;

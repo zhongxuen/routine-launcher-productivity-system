@@ -81,7 +81,7 @@ pub(super) fn owed_by_predicate(bound: &str) -> String {
 /// — the live one, usually today's — and the template the next day is cloned
 /// from (see [`ensure_recurring_instances`]), which is what makes editing a
 /// repeating task carry forward instead of only fixing a single day.
-const LATEST_IN_SERIES_PREDICATE: &str = "recurrence_id IS NOT NULL AND id = \
+pub(super) const LATEST_IN_SERIES_PREDICATE: &str = "recurrence_id IS NOT NULL AND id = \
      (SELECT MAX(latest.id) FROM tasks AS latest \
        WHERE latest.recurrence_id = tasks.recurrence_id)";
 
@@ -100,7 +100,7 @@ const LATEST_IN_SERIES_PREDICATE: &str = "recurrence_id IS NOT NULL AND id = \
 /// keep in step. Deleting the *task* clears `focus_sessions.task_id`
 /// (`ON DELETE SET NULL`), so the focused time survives in the record even
 /// though the task it was against does not.
-const FOCUS_SECONDS_COLUMN: &str = "COALESCE((SELECT SUM(f.duration_seconds) \
+pub(super) const FOCUS_SECONDS_COLUMN: &str = "COALESCE((SELECT SUM(f.duration_seconds) \
            FROM focus_sessions AS f \
           WHERE f.task_id = tasks.id AND f.ended_at IS NOT NULL), 0) AS focus_seconds";
 

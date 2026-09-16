@@ -202,6 +202,12 @@ fn open_folder(target: &str) -> Result<(), String> {
         return Err(format!("{target} is a file, not a folder."));
     }
 
+    // Under `cargo test` the checks above are the whole action: the folder is
+    // really looked at, but no Explorer window is put on whoever runs the suite.
+    if cfg!(test) {
+        return Ok(());
+    }
+
     tauri_plugin_opener::open_path(path, None::<&str>)
         .map_err(|err| format!("{target} could not be opened: {err}"))
 }

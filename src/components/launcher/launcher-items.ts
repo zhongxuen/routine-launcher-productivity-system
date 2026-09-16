@@ -25,8 +25,16 @@
 import { quickStartRoutines } from "@/components/dashboard/QuickStart";
 import type { RoutineWithActions } from "@/types/routine";
 
-/** The two quick actions of section 28's mockup, section 21's Start My Day, and every routine. */
-export type LauncherItemKind = "routine" | "add-task" | "start-focus" | "start-my-day";
+/**
+ * The two quick actions of section 28's mockup, section 21's Start My Day,
+ * section 22's Review My Day, and every routine.
+ */
+export type LauncherItemKind =
+  | "routine"
+  | "add-task"
+  | "start-focus"
+  | "start-my-day"
+  | "review-my-day";
 
 export interface LauncherItem {
   /** Stable across renders and unique within a list — the DOM id is built from it. */
@@ -79,8 +87,8 @@ export function launcherItems(routines: RoutineWithActions[]): LauncherItem[] {
 
 /**
  * Section 28's `+ Add Task` and `⏱ Start Focus`, then section 21's Start My
- * Day — after the two the mockup draws, since it is used once a day where
- * they are used all day.
+ * Day and section 22's Review My Day — after the two the mockup draws, since
+ * each is used once a day where they are used all day.
  *
  * Their keywords are the words someone would plausibly type looking for them
  * — "new" for adding, "timer" and "pomodoro" for focusing, "morning" for the
@@ -114,6 +122,15 @@ const QUICK_ACTIONS: LauncherItem[] = [
     hint: "Opens today's summary in the app",
     routine: null,
     keywords: "morning plan planning begin today routine",
+  },
+  {
+    key: "action-review-my-day",
+    kind: "review-my-day",
+    label: "Review My Day",
+    icon: null,
+    hint: "Opens today's review in the app",
+    routine: null,
+    keywords: "end my day evening finish wrap up tomorrow summary routine",
   },
 ];
 

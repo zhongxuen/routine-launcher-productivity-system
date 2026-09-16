@@ -31,6 +31,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 
 use crate::db::DbConnection;
+use crate::services::end_of_day;
 use crate::services::focus::FocusSession;
 use crate::services::notifications::{
     self, ReminderNotification, NATIVE_ACTION_BUTTONS, REMINDER_ACTION_TYPE,
@@ -207,6 +208,8 @@ pub fn start_scheduler(app: AppHandle) {
             if let Err(error) = deliver_due_reminders(&app) {
                 crate::log_error!("[notification] could not check reminders: {error}");
             }
+
+            announce_end_of_day_if_due(&app);
         });
 
     if let Err(error) = spawned {
@@ -298,6 +301,40 @@ pub fn announce_minimized_to_tray(app: &AppHandle) {
 
     if let Err(error) = show(app, &title, &body, None) {
         crate::log_error!("[notification] could not announce the tray: {error}");
+    }
+}
+
+/// Section 22's one end-of-day notification, if it is owed on this poll.
+///
+/// Rides the reminder scheduler rather than a thread of its own: it is one
+/// more thing to check every 30 seconds, whether or not a window is open.
+/// `end_of_day::take_notification` decides and records in one step, so it is
+/// sent at most once a day. Nothing is opened — section 22's review is
+/// optional, and the notification only says where it is.
+fn announce_end_of_day_if_due(app: &AppHandle) {
+    let owed = {
+        let db = app.state::<DbConnection>();
+        let conn = match db.lock() {
+            Ok(conn) => conn,
+            Err(error) => {
+                crate::log_error!("[notification] could not reach the database: {error}");
+                return;
+            }
+        };
+        end_of_day::take_notification(&conn)
+    };
+
+    match owed {
+        Ok(true) => {
+            let (title, body) = notifications::end_of_day();
+            if let Err(error) = show(app, &title, &body, None) {
+                crate::log_error!("[notification] could not announce the end of the day: {error}");
+            }
+        }
+        Ok(false) => {}
+        Err(error) => {
+            crate::log_error!("[notification] could not check the end of the day: {error}")
+        }
     }
 }
 

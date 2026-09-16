@@ -1,3 +1,6 @@
+import { useEffect } from "react";
+import { Lock } from "lucide-react";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import {
@@ -20,11 +23,50 @@ import StartupCard from "@/components/settings/StartupCard";
 import TaskCategoriesCard from "@/components/settings/TaskCategoriesCard";
 import UpdatesCard from "@/components/settings/UpdatesCard";
 import WalkthroughCard from "@/components/settings/WalkthroughCard";
-import { useThemeStore, type ThemePreference } from "@/stores/themeStore";
+import { useProgressStore } from "@/stores/progressStore";
+import {
+  ACCENTS,
+  isAccentUnlocked,
+  useThemeStore,
+  type AccentPreference,
+  type ThemePreference,
+} from "@/stores/themeStore";
+
+/**
+ * Names the rewards and the level that opens each, in a sentence under the
+ * picker. The same fact is on the locked rows themselves, but those are
+ * disabled — dimmed below the contrast a sentence has to meet — so it is
+ * also said here, where it can be read.
+ */
+function accentUnlockHint(level: number | null, isLoading: boolean): string {
+  const rewards = ACCENTS.filter((accent) => accent.unlockLevel !== null);
+  const locked = rewards.filter((accent) => !isAccentUnlocked(accent, level));
+  if (locked.length === 0) return "Every accent is unlocked.";
+
+  const list = rewards
+    .map((accent) => `${accent.label} at level ${accent.unlockLevel}`)
+    .join(" and ");
+  const where =
+    level !== null
+      ? ` You are level ${level}.`
+      : isLoading
+        ? ""
+        : " Your level could not be read just now.";
+  return `${list} unlock as you level up — nothing else in the app does.${where}`;
+}
 
 function Settings() {
   const preference = useThemeStore((state) => state.preference);
   const setPreference = useThemeStore((state) => state.setPreference);
+  const accent = useThemeStore((state) => state.accent);
+  const setAccent = useThemeStore((state) => state.setAccent);
+  const level = useProgressStore((state) => state.progress?.level.level ?? null);
+  const isProgressLoading = useProgressStore((state) => state.isLoading);
+  const loadProgress = useProgressStore((state) => state.loadProgress);
+
+  useEffect(() => {
+    void loadProgress();
+  }, [loadProgress]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -42,7 +84,7 @@ function Settings() {
             Choose how the app looks. "System" follows your Windows theme.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-6">
           <div className="flex items-center justify-between gap-4">
             <Label htmlFor="theme">Theme</Label>
             <Select
@@ -58,6 +100,48 @@ function Settings() {
                 <SelectItem value="system">System</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          {/* Section 48's cosmetic rewards. The accent in use is always
+              selectable, even if it is above the current level — after a data
+              reset, say — because a colour already chosen is never taken back. */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="accent">Accent</Label>
+              <Select
+                value={accent}
+                onValueChange={(value) => setAccent(value as AccentPreference)}
+              >
+                <SelectTrigger id="accent" className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ACCENTS.map((option) => {
+                    const isAvailable =
+                      option.id === accent || isAccentUnlocked(option, level);
+                    return (
+                      <SelectItem key={option.id} value={option.id} disabled={!isAvailable}>
+                        <span
+                          data-accent-preview={option.id}
+                          className="size-3 shrink-0 rounded-full bg-primary"
+                          aria-hidden
+                        />
+                        {option.label}
+                        {!isAvailable && (
+                          <span className="ml-auto flex items-center gap-1 pl-2 text-xs">
+                            <Lock className="size-3" aria-hidden />
+                            Level {option.unlockLevel}
+                          </span>
+                        )}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {accentUnlockHint(level, isProgressLoading)}
+            </p>
           </div>
         </CardContent>
       </Card>

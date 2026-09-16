@@ -109,6 +109,26 @@ export interface ProductivityStats {
    * history" as a calendar of the days that counted.
    */
   streakHistory: DayStats[];
+  /**
+   * The last eight weeks, oldest first, ending with the current one — section
+   * 82's trend across weeks. Weeks start on the same day as `week`, and the
+   * last entry's totals are `week`.
+   */
+  weekTrend: TrendWeek[];
+}
+
+/** One week of the trend across weeks. */
+export interface TrendWeek {
+  /** First local day of the week, `YYYY-MM-DD`. */
+  start: string;
+  /** Last local day, inclusive. */
+  end: string;
+  /**
+   * The week's totals, or null for a week that ended before the first
+   * recorded activity — a week the app has no record of, drawn empty rather
+   * than as a zero. A quiet week after that first activity is a real zero.
+   */
+  totals: PeriodStats | null;
 }
 
 // ---------------------------------------------------------------------------

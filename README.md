@@ -209,6 +209,20 @@ driven by a `dark` class on `<html>`, managed by `src/stores/themeStore.ts` and
 changeable from Settings. The preference currently persists to `localStorage`;
 it moves to the `settings` table when that feature lands.
 
+**Accent themes.** Beside the `dark` class, a `data-accent` attribute on
+`<html>` picks one of four palettes — Ocean, Forest, Iris, Copper — or, when
+absent, the default Graphite. An accent replaces only `--primary`,
+`--primary-foreground` and `--ring`, so buttons, checkboxes, switches, progress
+bars and focus rings take its colour while surfaces and every token that carries
+meaning (priority, status, destructive, a focus break) stay put. The choice is
+stored next to the theme (`routine-launcher.accent`) by the same store, shares
+its crossfade (skipped under reduced motion), and reaches the popup, launcher
+and widget through the same `refreshTheme`. Two accents are cosmetic rewards
+(section 48): Iris opens at level 3 and Copper at level 5, shown locked with that
+level in Settings → Appearance. That is the only level gate in the app; Light,
+Dark, System and the default accent are always available, and an accent already
+in use is never taken away.
+
 **The colour tokens are contrast-constrained, not chosen by eye.** Every token
 drawn as text clears 4.5:1 against the surfaces it appears on, in both themes;
 `--ring` and `--input`, which identify a control rather than spell anything,
@@ -229,6 +243,12 @@ Two consequences worth knowing before adding a colour:
 - **Do not fade the focus ring.** Same arithmetic, same reason. The shadcn
   primitives here paint `ring-ring` at full opacity rather than upstream's
   `ring-ring/50`.
+- **An accent palette meets the same bar, in both themes.** Specifically:
+  `--primary-foreground` on `--primary` (and on its 90% hover) and `--primary`
+  as text on page, card, `--muted` and an achievement tile's 10% tint, at
+  4.5:1; `--ring` and `--primary` as a fill on page, card and `--muted`, and
+  against a progress bar's 20% track, at 3:1. Keep palette values inside sRGB
+  so what was measured is what gets painted.
 
 ---
 
@@ -759,19 +779,21 @@ Settings opens on **Daily**, §52's nine Daily Settings, saved together with
 one Save button because they are checked together: the start and end of the
 day, the default focus length, task priority and reminder, the start- and
 end-of-day routines, the daily quest count and the day the week starts on.
+A tenth switch, **End-of-day notification** (off by default), belongs to the
+end-of-day review below.
 They live in the `settings` table under `daily.*` keys
 (`get_daily_settings` / `set_daily_settings`, `services/settings.rs`), and a
 key that was never written reads as its default (09:00, 18:00, 50 minutes,
-Normal, no reminder, no routines, 3 quests, Monday), so there is no migration.
-Rust validates every field and the card shows its refusal as it is. Eight
-have consumers: the Custom timer starts at the default focus length, + Add
+Normal, no reminder, no routines, 3 quests, Monday, notification off), so
+there is no migration. Rust validates every field and the card shows its
+refusal as it is. All of them have consumers: the Custom timer starts at the default focus length, + Add
 Task opens on the default priority, the edit dialog suggests the default
 reminder when a task is given its first due time (the Add task form has no due
 time for "minutes before" to count back from), the dashboard shows 2 or 3
 objectives, Statistics counts This Week from Monday or Sunday, Start My Day
-opens the start-of-day routine (see Phase 6), and Plan Today measures the
-time left against the day's start and end (below). The end-of-day routine is
-only stored so far, for End My Day, and the card says so.
+opens the start-of-day routine (see Phase 6), Plan Today measures the time
+left against the day's start and end (below), and the end-of-day review is
+offered from the day's end and opens the end-of-day routine (Phase 6).
 
 Categories are managed in Settings &rsaquo; Task categories: rename in place,
 recolour from a palette, add, and delete. The seven seeded ones (§13) are
@@ -835,13 +857,14 @@ commands, so the My Routines cards (§29), the builder with reorderable actions
 (§31), the launch panel with its per-action ✓ / ✗ list and Retry / Continue
 (§32) and the statistics block (§33) all read and write SQLite. Saving the
 builder replaces a routine's whole action list in list order, so what is on
-screen is the run order. The Templates tab (§64) ships four starter routines —
-Coding Mode, Study Mode, Work Mode and Start My Day — which are pre-filled
+screen is the run order. The Templates tab (§64) ships five starter routines —
+Coding Mode, Study Mode, Work Mode, Start My Day and End My Day — which are pre-filled
 `create_routine` payloads and nothing more: adding one produces an ordinary,
 editable routine, and it opens in the builder so the guessed targets can be
 checked before the first launch. Start My Day (§21) is calendar and email
 URLs and a 10-minute timer; its "open the task dashboard" needs no action,
-because the dashboard is where it is started from.
+because the dashboard is where it is started from. End My Day (§52) is the
+calendar, for tomorrow, and a 10-minute timer to wrap up.
 
 Of the five figures in §33, launches and last-used are real — the backend
 stamps them inside `launch_routine`, and the store re-reads the list after
@@ -1161,6 +1184,33 @@ task.
       the routine's own `last_launched_at` rather than a flag of its own. The
       tray menu and the quick launcher both have a Start My Day item, which
       brings the main window forward and opens the same dialog on the dashboard
+- [x] End-of-day review and End My Day — §22's optional "Day complete"
+      summary and §92's End My Day
+      (`src/components/dashboard/EndOfDayDialog.tsx`). It shows today's tasks
+      completed / owed, focus and routines launched, all from §36's TODAY
+      figures in `getProductivityStats` (the same read as the dashboard's
+      statistics, so there is no second way of counting the day), the number
+      of today's tasks still open, the number due tomorrow (with any
+      repeating tasks tomorrow will get noted beside it), and **Streak
+      maintained** or **Streak not yet kept today** from the progress store.
+      The open tasks are listed, and nothing moves by itself: each has **Move
+      to tomorrow**, and **Move all to tomorrow** does the same for every one,
+      each an ordinary `updateTask` of the due date that keeps the time of day.
+      That is §67's user-initiated rule, applied to tasks. **Review tomorrow**
+      goes to Tasks &rsaquo; Upcoming. **End my day** hands the end-of-day
+      routine from Settings &rsaquo; Daily to `routineStore.launchRoutine`, so
+      it opens the usual §32 launch panel. With no routine set, that button
+      becomes **Choose a routine** and **Create from template**, which adds the
+      End My Day template, makes it the end-of-day routine and opens it in the
+      builder. §22 calls the review optional, so it never opens itself. The
+      dashboard shows **Review my day** from the day's end until midnight, and
+      the tray menu (🌙 Review My Day) and the quick launcher open it at any
+      hour. The one thing the app does unasked is a single native notification
+      at the day's end, and only when **End-of-day notification** is switched
+      on in Settings &rsaquo; Daily. The reminder scheduler checks for it on
+      its 30-second poll (`services/end_of_day.rs`), sends it at most once a
+      day, and stays quiet if the app was not running within 30 minutes of the
+      end time
 
 **Phase 7 — Notifications + Popup** ✅ complete
 
@@ -1239,7 +1289,8 @@ task.
       item shows the main window and emits one `tray://action`, and
       `src/hooks/useTrayActions.ts` turns it into the same call the button
       for it makes: `launchRoutine` (with §32's checklist panel),
-      `startFocusFor`, `openQuickAdd`, Start My Day's dialog, or a
+      `startFocusFor`, `openQuickAdd`, Start My Day's or the end-of-day
+      review's dialog, or a
       navigation. Only Exit is handled in Rust, because quitting is the one
       thing no window can do for itself
 - [x] Close to tray — closing the main window hides it instead of quitting,
@@ -1268,9 +1319,10 @@ task.
       add-task mode and then out of the window — because a launcher you have
       to Tab into is one you have stopped being able to type in. Routines
       launch through the same `launch_routine` and tasks are added through the
-      same `create_task`; only `⏱ Start Focus` and Start My Day are handed to
-      the main window, because a focus session is a clock and the clock lives
-      there (and so do Start My Day's dialog and launch panel)
+      same `create_task`; only `⏱ Start Focus`, Start My Day and Review My
+      Day are handed to the main window, because a focus session is a clock
+      and the clock lives there (and so do the two dialogs and the launch
+      panel)
 
 **Phase 9 — Simple Gamification** ✅ complete
 
@@ -1683,7 +1735,9 @@ labelled usage time. Left for a Tier 5 pass.
       level number swelling once and nothing else — no modal, no overlay, no
       confetti, nothing to dismiss — because levelling up happens precisely
       when the user has just finished something and is about to start the
-      next thing
+      next thing. Four accent palettes sit on top of either theme (see
+      Theming); two unlock at levels 3 and 5 as §48's cosmetic rewards, and
+      every one was measured against the same contrast bar as the base tokens
 - [x] Sound effects — off by default, and silent until explicitly enabled;
       only the exact stored string `on` counts, so a missing key, an older
       build's value or a corrupt profile all stay quiet. Five short cues

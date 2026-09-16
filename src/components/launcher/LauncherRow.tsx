@@ -1,4 +1,4 @@
-import { Plus, Rocket, Sun, Timer } from "lucide-react";
+import { Moon, Plus, Rocket, Sun, Timer } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -74,6 +74,7 @@ function ItemGlyph({ item }: { item: LauncherItem }) {
   if (item.kind === "add-task") return <Plus className="size-4 shrink-0" aria-hidden />;
   if (item.kind === "start-focus") return <Timer className="size-4 shrink-0" aria-hidden />;
   if (item.kind === "start-my-day") return <Sun className="size-4 shrink-0" aria-hidden />;
+  if (item.kind === "review-my-day") return <Moon className="size-4 shrink-0" aria-hidden />;
 
   return item.icon ? (
     <span aria-hidden className="w-4 shrink-0 text-center text-sm leading-none">

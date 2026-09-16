@@ -71,6 +71,7 @@ const START_ROUTINE_KEY: &str = "daily.start_of_day_routine_id";
 const END_ROUTINE_KEY: &str = "daily.end_of_day_routine_id";
 const QUEST_COUNT_KEY: &str = "daily.quest_count";
 const WEEK_START_KEY: &str = "daily.week_start";
+const END_OF_DAY_NOTIFICATION_KEY: &str = "daily.end_of_day_notification";
 
 /// How an unset optional value — no reminder, no routine — is written, so the
 /// row says what was chosen rather than being an empty string.
@@ -126,7 +127,8 @@ impl WeekStart {
     }
 }
 
-/// Section 52's nine Daily Settings, as one value.
+/// Section 52's nine Daily Settings, as one value, plus the switch for the
+/// end-of-day notification (section 22).
 ///
 /// Read and written whole, because two of them are only valid together (the
 /// day has to end after it starts) and because every screen that reads one
@@ -140,8 +142,9 @@ impl WeekStart {
 /// priority and the reminder are form defaults, the quest count and the week
 /// start shape the quests and the statistics, the start-of-day routine is what
 /// Start My Day opens, and the day's start and end times bound PLAN TODAY's
-/// time left (both read on the frontend). The end-of-day routine is stored
-/// for the end-of-day flow.
+/// time left (both read on the frontend). The end-of-day routine is what End
+/// My Day opens, and the day's end is when the dashboard offers the review
+/// and, if switched on, when [`super::end_of_day`] sends its one notification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DailySettings {
@@ -160,6 +163,12 @@ pub struct DailySettings {
     /// How many of the day's quests appear: 2 or 3.
     pub daily_quest_count: i64,
     pub week_start: WeekStart,
+    /// One native notification at the day's end, offering the review. Off
+    /// unless turned on: section 22's review is optional, so it does not
+    /// announce itself to someone who never asked. `serde(default)` so a
+    /// payload from before the switch existed still reads.
+    #[serde(default)]
+    pub end_of_day_notification: bool,
 }
 
 impl Default for DailySettings {
@@ -174,6 +183,7 @@ impl Default for DailySettings {
             end_of_day_routine_id: None,
             daily_quest_count: MAX_QUEST_COUNT,
             week_start: WeekStart::Monday,
+            end_of_day_notification: false,
         }
     }
 }
@@ -218,6 +228,7 @@ pub fn daily_settings(conn: &Connection) -> ServiceResult<DailySettings> {
         })?
         .unwrap_or(defaults.daily_quest_count),
         week_start: week_start(conn)?,
+        end_of_day_notification: get_bool(conn, END_OF_DAY_NOTIFICATION_KEY, false)?,
     })
 }
 
@@ -269,6 +280,11 @@ pub fn set_daily_settings(
         &settings.daily_quest_count.to_string(),
     )?;
     set(&transaction, WEEK_START_KEY, settings.week_start.as_str())?;
+    set_bool(
+        &transaction,
+        END_OF_DAY_NOTIFICATION_KEY,
+        settings.end_of_day_notification,
+    )?;
     transaction.commit()?;
 
     Ok(settings)
@@ -444,6 +460,7 @@ mod tests {
         assert_eq!(settings.end_of_day_routine_id, None);
         assert_eq!(settings.daily_quest_count, 3);
         assert_eq!(settings.week_start, WeekStart::Monday);
+        assert!(!settings.end_of_day_notification);
         assert_eq!(settings, DailySettings::default());
     }
 
@@ -463,6 +480,7 @@ mod tests {
             end_of_day_routine_id: Some(evening),
             daily_quest_count: 2,
             week_start: WeekStart::Sunday,
+            end_of_day_notification: true,
         };
 
         assert_eq!(set_daily_settings(&conn, chosen.clone()).unwrap(), chosen);
@@ -474,6 +492,7 @@ mod tests {
             default_reminder_minutes: None,
             start_of_day_routine_id: None,
             end_of_day_routine_id: None,
+            end_of_day_notification: false,
             ..chosen
         };
         set_daily_settings(&conn, cleared.clone()).unwrap();

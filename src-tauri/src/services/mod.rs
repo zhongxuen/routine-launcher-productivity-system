@@ -138,6 +138,18 @@
 //! `tasks` and the Daily Settings, worked out when the panel is drawn, so
 //! nothing here duplicates what those two already store.
 //!
+//! `end_of_day` decides when section 22's one end-of-day notification is
+//! owed: switched on in the Daily Settings, at the day's end, once a day. It
+//! opens nothing; the reminder scheduler in `commands/notification.rs` asks
+//! it and shows the notification.
+//!
+//! `suggestions` is section 55's rule-based suggestions: "make it recurring?"
+//! and "update the estimate?", read from the task history `tasks` already
+//! keeps. Like `analytics` it owns no table and writes no task. It describes
+//! a change, and the frontend makes it through the task commands on a click.
+//! The one thing it stores is a declined suggestion, as a `settings` key per
+//! title, so that suggestion does not come back.
+//!
 //! `startup` is section 85's launch-at-Windows-startup, and the only service
 //! whose state lives outside this app entirely — in the `Run` key of the
 //! registry rather than in the `settings` table, so the switch in Settings
@@ -203,6 +215,7 @@ pub mod daily_plans;
 pub mod desktop;
 pub mod downloads;
 pub mod duplicates;
+pub mod end_of_day;
 pub mod error;
 pub mod focus;
 pub mod health;
@@ -223,6 +236,7 @@ pub mod settings;
 pub mod shortcuts;
 pub mod startup;
 pub mod storage;
+pub mod suggestions;
 pub mod task_categories;
 pub mod task_recurrence;
 pub mod tasks;

@@ -13,14 +13,16 @@ import {
   focusBarFraction,
   inWeeks,
   shortDate,
+  weekBarFraction,
   weekRange,
+  weekTooltip,
   weekdayInitial,
   weekdayName,
 } from "@/lib/analytics-utils";
 import { formatFocusTime } from "@/lib/routine-utils";
 import { cn } from "@/lib/utils";
 import { useAnalyticsStore } from "@/stores/analyticsStore";
-import type { DayStats, PeriodStats, ProductivityStats } from "@/types/analytics";
+import type { DayStats, PeriodStats, ProductivityStats, TrendWeek } from "@/types/analytics";
 
 /** A figure that has nothing behind it — never a zero standing in for one. */
 const NOT_MEASURED = "—";
@@ -38,8 +40,9 @@ const NOT_MEASURED = "—";
  *                             Most productive day: Wednesday
  * ```
  *
- * Two panels, in the plan's own order, plus the two things section 82 adds to
- * them: the week's day-by-day focus, and the streak history underneath.
+ * Two panels, in the plan's own order, plus the three things section 82 adds
+ * to them: the week's day-by-day focus, focus across the last eight weeks,
+ * and the streak history underneath.
  *
  * # Why the figures are what they are
  *
@@ -189,6 +192,7 @@ function Panels({ stats }: { stats: ProductivityStats }) {
       </div>
 
       <WeekTrend days={stats.weekDays} today={stats.todayDate} />
+      <WeeklyTrend weeks={stats.weekTrend} />
       <StreakHistory stats={stats} />
     </div>
   );
@@ -346,6 +350,123 @@ function WeekTrend({ days, today }: { days: DayStats[]; today: string }) {
 }
 
 /**
+ * Section 82's "productivity trends" across weeks: the last eight weeks of
+ * focus, one bar each, with the tasks completed underneath.
+ *
+ * Bars are relative to the busiest week shown, for the same reason the days
+ * above are relative to the busiest day. Each bar is a plain SVG stretched to
+ * its column — no chart library for eight rectangles.
+ *
+ * Two kinds of nothing are drawn differently, because they mean different
+ * things (section 88):
+ *
+ * * **A week before the first recorded activity** has no bar and no track —
+ *   only a dashed baseline — and its figures are dashes. The app was not
+ *   keeping a record then, so a zero would draw a slump that never happened.
+ * * **A quiet week after it** is a real zero: a sliver of track, "0m", "0".
+ *
+ * The current week is lighter while it is still under way, so a Wednesday
+ * does not read as a bad week.
+ */
+function WeeklyTrend({ weeks }: { weeks: TrendWeek[] }) {
+  const current = weeks[weeks.length - 1];
+  const anyRecorded = weeks.some((week) => week.totals !== null);
+
+  return (
+    <Card className="gap-4 px-6 py-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-xs font-medium tracking-widest text-muted-foreground">
+          FOCUS BY WEEK
+        </h2>
+        <p className="flex items-center gap-1.5 text-xs text-muted-subtle">
+          <CircleCheckBig className="size-3" aria-hidden />
+          tasks completed under each week
+        </p>
+      </div>
+
+      <ol className="flex items-end gap-2" aria-label="Focus time and tasks completed by week">
+        {weeks.map((week) => {
+          const isCurrent = week === current;
+          const totals = week.totals;
+          const height = totals ? Math.max(2, weekBarFraction(week, weeks) * 100) : 0;
+
+          return (
+            <li
+              key={week.start}
+              className="flex min-w-0 flex-1 flex-col items-center gap-1.5"
+              title={weekTooltip(week, isCurrent)}
+            >
+              <span
+                className={cn(
+                  "truncate text-[0.65rem] tabular-nums",
+                  totals ? "text-muted-foreground" : "text-muted-foreground/40",
+                )}
+              >
+                {totals ? formatFocusTime(totals.focusSeconds) : NOT_MEASURED}
+              </span>
+
+              <svg
+                viewBox="0 0 10 100"
+                preserveAspectRatio="none"
+                className="h-24 w-full"
+                aria-hidden
+              >
+                {totals ? (
+                  <rect
+                    x={0}
+                    y={100 - height}
+                    width={10}
+                    height={height}
+                    className={cn(
+                      totals.focusSeconds > 0 ? "fill-primary" : "fill-muted",
+                      isCurrent && totals.focusSeconds > 0 && "opacity-60",
+                    )}
+                  />
+                ) : (
+                  <line
+                    x1={0}
+                    x2={10}
+                    y1={99}
+                    y2={99}
+                    strokeWidth={1.5}
+                    strokeDasharray="3 3"
+                    vectorEffect="non-scaling-stroke"
+                    className="stroke-muted-foreground/40"
+                  />
+                )}
+              </svg>
+
+              <span
+                className={cn(
+                  "truncate text-xs",
+                  isCurrent ? "font-medium text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {isCurrent ? "This week" : shortDate(week.start)}
+              </span>
+              <span
+                className={cn(
+                  "text-xs tabular-nums",
+                  totals ? "text-foreground" : "text-muted-foreground/40",
+                )}
+              >
+                {totals ? totals.tasksCompleted : NOT_MEASURED}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+
+      {!anyRecorded && (
+        <p className="text-xs text-muted-foreground">
+          Weeks fill in from your first finished task, focus session or routine launch.
+        </p>
+      )}
+    </Card>
+  );
+}
+
+/**
  * Section 82's streak history: four weeks of days, filled where the day
  * counted.
  *
@@ -417,6 +538,7 @@ function Loading() {
         <Skeleton className="h-52 w-full rounded-xl" />
       </div>
       <Skeleton className="h-48 w-full rounded-xl" aria-hidden />
+      <Skeleton className="h-52 w-full rounded-xl" aria-hidden />
       <Skeleton className="h-44 w-full rounded-xl" aria-hidden />
     </div>
   );

@@ -24,9 +24,9 @@
 //! started down the real `cmd /C` branch of the executor, and it exits on its
 //! own without drawing anything — where pointing the action at a GUI program
 //! would leave a window open on whoever ran the suite. The folder is the
-//! temp directory, and opening it does put one Explorer window on screen;
-//! that is the action being tested, and there is no honest way to test it
-//! without performing it.
+//! temp directory, which the executor really checks exists and is a folder;
+//! under `cargo test` it stops short of handing it to Explorer, so no window
+//! opens.
 
 use std::path::PathBuf;
 

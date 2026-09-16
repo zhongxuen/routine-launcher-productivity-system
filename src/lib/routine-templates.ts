@@ -58,6 +58,29 @@ export const START_MY_DAY_TEMPLATE: RoutineTemplate = {
   },
 };
 
+/**
+ * Section 52's "🌙 End My Day", and the template the end-of-day review
+ * (section 22) offers when no end-of-day routine is set.
+ *
+ * The calendar is for tomorrow, which is what the review's "Review tomorrow"
+ * is about too; the ten minutes are for wrapping up — closing what is open
+ * and noting where to pick up. Like Start My Day's, the targets are guesses
+ * and the builder opens so they can be checked.
+ */
+export const END_MY_DAY_TEMPLATE: RoutineTemplate = {
+  id: "end-my-day",
+  summary: "Tomorrow's calendar, then 10 minutes to wrap up.",
+  routine: {
+    name: "End My Day",
+    description: "Look at tomorrow, note where you stopped, close the day.",
+    icon: "🌙",
+    actions: [
+      { type: "url", target: "https://calendar.google.com" },
+      { type: "timer", target: "10" },
+    ],
+  },
+};
+
 export const ROUTINE_TEMPLATES: RoutineTemplate[] = [
   {
     id: "coding-mode",
@@ -104,4 +127,5 @@ export const ROUTINE_TEMPLATES: RoutineTemplate[] = [
     },
   },
   START_MY_DAY_TEMPLATE,
+  END_MY_DAY_TEMPLATE,
 ];

@@ -17,6 +17,14 @@ interface AppState {
   requestStartMyDay: () => void;
   /** Clears the request, answering whether there was one to take. */
   takeStartMyDayRequest: () => boolean;
+
+  /**
+   * The same, for section 22's end-of-day review (`EndOfDayDialog`), which
+   * is asked for from the same three places.
+   */
+  reviewMyDayRequested: boolean;
+  requestReviewMyDay: () => void;
+  takeReviewMyDayRequest: () => boolean;
 }
 
 /**
@@ -28,6 +36,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   takeStartMyDayRequest: () => {
     if (!get().startMyDayRequested) return false;
     set({ startMyDayRequested: false });
+    return true;
+  },
+
+  reviewMyDayRequested: false,
+  requestReviewMyDay: () => set({ reviewMyDayRequested: true }),
+  takeReviewMyDayRequest: () => {
+    if (!get().reviewMyDayRequested) return false;
+    set({ reviewMyDayRequested: false });
     return true;
   },
 }));

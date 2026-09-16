@@ -24,6 +24,7 @@ pub mod routines;
 pub mod screenshots;
 pub mod settings;
 pub mod storage;
+pub mod suggestions;
 pub mod task_categories;
 pub mod task_recurrence;
 pub mod tasks;

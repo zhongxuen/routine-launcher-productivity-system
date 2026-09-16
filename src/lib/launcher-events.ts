@@ -38,6 +38,9 @@ const START_FOCUS_EVENT = "launcher://start-focus";
  */
 const START_MY_DAY_EVENT = "launcher://start-my-day";
 
+/** Section 22's end-of-day review, for the same reason as Start My Day. */
+const REVIEW_MY_DAY_EVENT = "launcher://review-my-day";
+
 interface LauncherRequest {
   /** Which webview asked, so nobody answers their own request. */
   source: string;
@@ -81,6 +84,23 @@ export function requestStartMyDay(): void {
 /** Subscribes to Start My Day requested from *another* window. */
 export async function onStartMyDayRequested(handler: () => void): Promise<UnlistenFn> {
   return listen<LauncherRequest>(START_MY_DAY_EVENT, (event) => {
+    if (event.payload.source === WEBVIEW_ID) return;
+    handler();
+  });
+}
+
+/** Asks the main window to open the end-of-day review. Fire-and-forget, as above. */
+export function requestReviewMyDay(): void {
+  const payload: LauncherRequest = { source: WEBVIEW_ID };
+
+  void emit(REVIEW_MY_DAY_EVENT, payload).catch((cause) => {
+    console.error("Could not ask the app to open the day's review:", cause);
+  });
+}
+
+/** Subscribes to the end-of-day review requested from *another* window. */
+export async function onReviewMyDayRequested(handler: () => void): Promise<UnlistenFn> {
+  return listen<LauncherRequest>(REVIEW_MY_DAY_EVENT, (event) => {
     if (event.payload.source === WEBVIEW_ID) return;
     handler();
   });

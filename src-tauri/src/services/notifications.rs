@@ -232,6 +232,22 @@ pub fn minimized_to_tray() -> (String, String) {
     )
 }
 
+/// Section 22's end-of-day notification, sent once at the day's end when the
+/// user has switched it on (see `services::end_of_day`).
+///
+/// It says where the review is rather than what the day came to. The figures
+/// are the review's, read when it is opened, and a toast that summed the day
+/// up at 6 PM would be out of date by the time anyone acted on it. The body
+/// also promises what the review does not do, because "day complete" next to
+/// unfinished tasks could otherwise read as the app about to move them.
+pub fn end_of_day() -> (String, String) {
+    (
+        "🌙 Day complete".to_owned(),
+        "Review your day from the dashboard or the tray menu. Nothing is moved unless you          move it."
+            .to_owned(),
+    )
+}
+
 /// A one-off notification for the Settings page's "send a test" button, so a
 /// user whose OS has notifications muted finds out before a reminder is the
 /// thing that goes missing.

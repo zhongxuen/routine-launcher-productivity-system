@@ -3,7 +3,7 @@
  *
  * {@link DailySettings} mirrors the payload of `get_daily_settings` /
  * `set_daily_settings` in `src-tauri/src/services/settings.rs` field for
- * field. camelCase on the wire, like `analytics.ts`: it is nine keys of the
+ * field. camelCase on the wire, like `analytics.ts`: it is ten keys of the
  * `settings` table rather than a row, so there is no row shape to mirror.
  *
  * The ranges below are here to draw the controls — which lengths the input
@@ -44,6 +44,12 @@ export interface DailySettings {
   /** How many of the day's quests appear. {@link QUEST_COUNTS}. */
   dailyQuestCount: number;
   weekStart: WeekStart;
+  /**
+   * One native notification at `dayEndTime` offering the end-of-day review
+   * (section 22). Off by default: the review is optional and never opens on
+   * its own.
+   */
+  endOfDayNotification: boolean;
 }
 
 /**
@@ -60,6 +66,7 @@ export const DEFAULT_DAILY_SETTINGS: DailySettings = {
   endOfDayRoutineId: null,
   dailyQuestCount: 3,
   weekStart: "monday",
+  endOfDayNotification: false,
 };
 
 /** The range of the default focus length, in minutes. */
