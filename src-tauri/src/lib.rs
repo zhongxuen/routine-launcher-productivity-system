@@ -87,6 +87,24 @@ pub fn run() {
             // to launch.
             close_abandoned_focus_session(&conn, "was left running by the last run");
 
+            // Section 92's sync folder, before anything can read the
+            // database: when automatic sync is on and only the folder has
+            // changed, this is the one moment its data can replace this
+            // device's without replacing anything on screen. Never fatal - a
+            // folder on a drive that is not connected is an ordinary morning.
+            let mut conn = conn;
+            let version = app.package_info().version.to_string();
+            match services::sync::at_startup(&mut conn, &version, &app_data_dir) {
+                Ok(services::sync::AutoOutcome::Pulled) => {
+                    crate::log_info!("[sync] pulled newer data from the sync folder")
+                }
+                Ok(services::sync::AutoOutcome::Pushed) => {
+                    crate::log_info!("[sync] pushed this device's changes to the sync folder")
+                }
+                Ok(_) => {}
+                Err(error) => crate::log_warn!("[sync] start-up sync did not run: {error}"),
+            }
+
             app.manage(db::DbConnection::new(conn));
 
             // Reminders are checked by a background thread rather than by the
@@ -96,6 +114,15 @@ pub fn run() {
             // the connection is managed, because the first thing it does is
             // ask for it.
             commands::notification::start_scheduler(app.handle().clone());
+
+            // Section 92 Tier 5's background work, each of which does nothing
+            // until its switch is on: application usage (section 37), the
+            // sync folder's periodic push and the calendar feed refresh. The
+            // phone companion only listens if it was left switched on.
+            services::app_usage::start(app.handle().clone());
+            commands::sync::start_background(app.handle().clone());
+            commands::calendar::start_feed_refresher(app.handle().clone());
+            commands::companion::restore(app.handle());
 
             // The tray of section 27. Built after the connection is managed
             // for the same reason: its first menu is today's task count and
@@ -251,11 +278,32 @@ pub fn run() {
             commands::app_info::get_app_version,
             commands::app_info::get_launch_at_startup,
             commands::app_info::set_launch_at_startup,
+            commands::app_usage::get_app_usage,
+            commands::app_usage::get_usage_tracking_enabled,
+            commands::app_usage::set_usage_tracking_enabled,
+            commands::app_usage::clear_app_usage,
             commands::backup::default_backup_file_name,
             commands::backup::export_backup,
             commands::backup::inspect_backup,
             commands::backup::import_backup,
             commands::backup::reset_app_data,
+            commands::calendar::get_calendar_status,
+            commands::calendar::list_calendar_events,
+            commands::calendar::import_calendar_file,
+            commands::calendar::clear_calendar_file,
+            commands::calendar::clear_calendar_feed,
+            commands::calendar::set_calendar_feed,
+            commands::calendar::refresh_calendar_feed,
+            commands::calendar::default_calendar_export_name,
+            commands::calendar::export_tasks_calendar,
+            commands::companion::get_companion_status,
+            commands::companion::set_companion_enabled,
+            commands::companion::set_companion_port,
+            commands::companion::rotate_companion_token,
+            commands::sync::get_sync_status,
+            commands::sync::configure_sync,
+            commands::sync::sync_push,
+            commands::sync::sync_pull,
             commands::diagnostics::get_log_location,
             commands::diagnostics::open_log_folder,
             commands::diagnostics::log_frontend_error,
@@ -320,6 +368,10 @@ pub fn run() {
             commands::routines::retry_routine_actions,
             commands::routines::get_command_actions_enabled,
             commands::routines::set_command_actions_enabled,
+            commands::routine_share::suggest_routine_file_name,
+            commands::routine_share::export_routine,
+            commands::routine_share::inspect_routine_file,
+            commands::routine_share::import_routine_file,
             commands::duplicates::default_duplicate_folders,
             commands::duplicates::scan_duplicates,
             commands::duplicates::delete_duplicate_files,

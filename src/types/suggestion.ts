@@ -44,4 +44,21 @@ export interface UpdateEstimateSuggestion {
   suggested_minutes: number;
 }
 
-export type Suggestion = MakeRecurringSuggestion | UpdateEstimateSuggestion;
+/**
+ * "You often open these together. Create a routine?" Read from the opt-in
+ * application usage history (section 37), so it only appears once tracking is
+ * on and has seen the same programs used together on several days.
+ */
+export interface OpenTogetherSuggestion {
+  kind: "open_together";
+  key: string;
+  /** In the order the routine would open them. */
+  apps: { app_name: string; exe_path: string }[];
+  /** Days they were all in use in the same hour. */
+  days_together: number;
+}
+
+export type Suggestion =
+  | MakeRecurringSuggestion
+  | UpdateEstimateSuggestion
+  | OpenTogetherSuggestion;

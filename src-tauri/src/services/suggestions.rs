@@ -14,8 +14,12 @@
 //!   more than [`DRIFT_MIN_MINUTES`] away from its estimate. The suggested
 //!   estimate is the median of those three.
 //!
-//! The third, "you often open these together", needs application-usage data
-//! the app does not collect (section 37), so it is not here.
+//! - **You often open these together.** Programs each in use for at least
+//!   [`TOGETHER_MIN_SECONDS`] in the same local hour, on at least
+//!   [`TOGETHER_MIN_DAYS`] distinct days of the last [`REPEAT_WINDOW_DAYS`].
+//!   It reads the opt-in usage history (`services::app_usage`, section 37), so
+//!   it never fires for someone who has not turned tracking on. A group that
+//!   one routine already launches in full is not suggested.
 //!
 //! Titles are compared trimmed and case-insensitively, so "Check email" and
 //! "check email " are one task to these rules. Nothing in this module writes
@@ -29,6 +33,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
+use super::app_usage;
 use super::error::{ServiceError, ServiceResult};
 use super::settings;
 use super::task_recurrence::{self, RecurrenceFrequency};
@@ -46,11 +51,24 @@ pub const DRIFT_MIN_MINUTES: i64 = 10;
 /// about a few minutes and a short one is not nagged about a few percent.
 pub const DRIFT_MIN_FRACTION: f64 = 0.2;
 
+/// "… each used for at least two minutes in the same hour …"
+pub const TOGETHER_MIN_SECONDS: i64 = 2 * 60;
+/// "… on at least 5 days of the fortnight."
+pub const TOGETHER_MIN_DAYS: usize = 5;
+/// The most programs one suggested routine opens.
+pub const TOGETHER_MAX_APPS: usize = 5;
+
+/// Programs that are in the background of nearly every working hour, so
+/// pairing them with anything says nothing: the file manager, and the host
+/// that UWP apps run inside, which cannot be launched by path.
+const NOT_WORKSPACE_APPS: &[&str] = &["explorer.exe", "applicationframehost.exe"];
+
 /// Prefix of the `settings` keys that remember a dismissal.
 const DISMISSED_PREFIX: &str = "suggestions.dismissed.";
 
 const MAKE_RECURRING: &str = "make_recurring";
 const UPDATE_ESTIMATE: &str = "update_estimate";
+const OPEN_TOGETHER: &str = "open_together";
 
 /// Weekday tokens as `task_recurrence` stores them, indexed by
 /// `strftime('%w')` (0 = Sunday).
@@ -80,6 +98,15 @@ pub struct TaskTemplate {
     pub routine_id: Option<i64>,
 }
 
+/// One program a "you often open these together" routine would launch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SuggestedApp {
+    /// The executable's file name as last recorded, e.g. `Code.exe`.
+    pub app_name: String,
+    /// The full path last recorded for it: the routine action's target.
+    pub exe_path: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Suggestion {
@@ -107,12 +134,22 @@ pub enum Suggestion {
         current_minutes: i64,
         suggested_minutes: i64,
     },
+    /// "You often open these together. Create a routine?"
+    OpenTogether {
+        key: String,
+        /// In name order, which is also the order the routine opens them in.
+        apps: Vec<SuggestedApp>,
+        /// Distinct local days they were all in use in the same hour.
+        days_together: usize,
+    },
 }
 
 impl Suggestion {
     pub fn key(&self) -> &str {
         match self {
-            Self::MakeRecurring { key, .. } | Self::UpdateEstimate { key, .. } => key,
+            Self::MakeRecurring { key, .. }
+            | Self::UpdateEstimate { key, .. }
+            | Self::OpenTogether { key, .. } => key,
         }
     }
 }
@@ -156,8 +193,10 @@ fn list_on(conn: &Connection, today: &str) -> ServiceResult<Vec<Suggestion>> {
         }
     }
 
+    let together = open_together(conn, &window_start, today)?;
+
     let mut suggestions = Vec::new();
-    for suggestion in recurring.into_iter().chain(estimates) {
+    for suggestion in recurring.into_iter().chain(estimates).chain(together) {
         if !is_dismissed(conn, suggestion.key())? {
             suggestions.push(suggestion);
         }
@@ -291,13 +330,148 @@ fn drifts(focus_seconds: i64, estimate_minutes: i64) -> bool {
     gap > DRIFT_MIN_MINUTES * 60 && gap as f64 > estimate_seconds as f64 * DRIFT_MIN_FRACTION
 }
 
+/// Section 55's third rule, over the usage history. One suggestion per
+/// distinct group, strongest first; the line on screen shows the first that
+/// has not been dismissed.
+fn open_together(
+    conn: &Connection,
+    window_start: &str,
+    today: &str,
+) -> ServiceResult<Vec<Suggestion>> {
+    // (date, hour) -> the programs in real use that hour, lowercased.
+    let mut buckets: BTreeMap<(String, i64), BTreeSet<String>> = BTreeMap::new();
+    // lowercase name -> (name as recorded, latest path).
+    let mut names: BTreeMap<String, (String, String)> = BTreeMap::new();
+
+    let mut statement = conn.prepare(
+        "SELECT date, hour, app_name, exe_path
+           FROM app_usage
+          WHERE date BETWEEN ?1 AND ?2 AND seconds >= ?3 AND exe_path IS NOT NULL
+          ORDER BY date, hour",
+    )?;
+    let rows = statement.query_map(params![window_start, today, TOGETHER_MIN_SECONDS], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    for row in rows {
+        let (date, hour, app_name, exe_path) = row?;
+        let lower = app_name.to_lowercase();
+        if app_usage::is_shell_process(&lower) || NOT_WORKSPACE_APPS.contains(&lower.as_str()) {
+            continue;
+        }
+        buckets.entry((date, hour)).or_default().insert(lower.clone());
+        // Rows arrive oldest first, so the last write is the latest path.
+        names.insert(lower, (app_name, exe_path));
+    }
+
+    let days_with = |group: &BTreeSet<String>| -> usize {
+        buckets
+            .iter()
+            .filter(|(_, apps)| group.is_subset(apps))
+            .map(|((date, _), _)| date.as_str())
+            .collect::<BTreeSet<_>>()
+            .len()
+    };
+
+    // Every pair seen together on enough days, strongest first.
+    let all: Vec<&String> = names.keys().collect();
+    let mut seeds: Vec<(usize, BTreeSet<String>)> = Vec::new();
+    for (index, a) in all.iter().enumerate() {
+        for b in &all[index + 1..] {
+            let pair: BTreeSet<String> = [(*a).clone(), (*b).clone()].into();
+            let days = days_with(&pair);
+            if days >= TOGETHER_MIN_DAYS {
+                seeds.push((days, pair));
+            }
+        }
+    }
+    seeds.sort_by(|x, y| y.0.cmp(&x.0).then_with(|| x.1.cmp(&y.1)));
+
+    let covered = routine_app_sets(conn)?;
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut suggestions = Vec::new();
+
+    for (_, mut group) in seeds {
+        // Grow the pair while one more program keeps the group above the bar,
+        // taking whichever keeps the most days each time.
+        while group.len() < TOGETHER_MAX_APPS {
+            let best = all
+                .iter()
+                .filter(|name| !group.contains(**name))
+                .map(|name| {
+                    let mut grown = group.clone();
+                    grown.insert((*name).clone());
+                    (days_with(&grown), grown)
+                })
+                .filter(|(days, _)| *days >= TOGETHER_MIN_DAYS)
+                .max_by(|x, y| x.0.cmp(&y.0).then_with(|| y.1.cmp(&x.1)));
+            match best {
+                Some((_, grown)) => group = grown,
+                None => break,
+            }
+        }
+
+        let joined = group.iter().cloned().collect::<Vec<_>>().join("+");
+        let key = key_for(OPEN_TOGETHER, &joined);
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        if covered.iter().any(|routine| group.is_subset(routine)) {
+            continue;
+        }
+
+        suggestions.push(Suggestion::OpenTogether {
+            key,
+            days_together: days_with(&group),
+            apps: group
+                .iter()
+                .map(|lower| {
+                    let (app_name, exe_path) = &names[lower];
+                    SuggestedApp { app_name: app_name.clone(), exe_path: exe_path.clone() }
+                })
+                .collect(),
+        });
+    }
+
+    Ok(suggestions)
+}
+
+/// Per routine, the lowercase executable names its application actions
+/// launch, so a group one routine already opens is not suggested again. A
+/// bare target (`code`) counts as `code.exe`.
+fn routine_app_sets(conn: &Connection) -> ServiceResult<Vec<BTreeSet<String>>> {
+    let mut statement = conn.prepare(
+        "SELECT routine_id, target FROM routine_actions
+          WHERE type = 'application'
+          ORDER BY routine_id",
+    )?;
+    let mut sets: BTreeMap<i64, BTreeSet<String>> = BTreeMap::new();
+    let rows = statement.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
+    for row in rows {
+        let (routine_id, target) = row?;
+        let file = target
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(&target)
+            .trim()
+            .to_lowercase();
+        let file = if file.contains('.') { file } else { format!("{file}.exe") };
+        sets.entry(routine_id).or_default().insert(file);
+    }
+    Ok(sets.into_values().collect())
+}
+
 // ---------------------------------------------------------------------------
 // Dismissal
 // ---------------------------------------------------------------------------
 
 /// Remembers that the suggestion `key` was declined, for good.
 pub fn dismiss(conn: &Connection, key: &str) -> ServiceResult<()> {
-    let valid = [MAKE_RECURRING, UPDATE_ESTIMATE].iter().any(|kind| {
+    let valid = [MAKE_RECURRING, UPDATE_ESTIMATE, OPEN_TOGETHER].iter().any(|kind| {
         key.strip_prefix(kind)
             .and_then(|rest| rest.strip_prefix(':'))
             .is_some_and(|title| !title.is_empty() && title == normalize_title(title))
@@ -761,6 +935,104 @@ mod tests {
             assert!(dismiss(&conn, bad).is_err(), "{bad:?}");
         }
         dismiss(&conn, "make_recurring:title").unwrap();
+    }
+
+    // --- You often open these together ------------------------------------
+
+    /// `app` in real use at `hour` on each of `days` (dates in September 2026).
+    fn used(conn: &Connection, app: &str, days: &[u32], hour: i64) {
+        for day in days {
+            app_usage::record(
+                conn,
+                &format!("2026-09-{day:02}"),
+                hour,
+                app,
+                Some(&format!(r"C:\Apps\{app}")),
+                600,
+            )
+            .unwrap();
+        }
+    }
+
+    fn together(conn: &Connection) -> Vec<(Vec<String>, usize)> {
+        suggestions(conn)
+            .into_iter()
+            .filter_map(|suggestion| match suggestion {
+                Suggestion::OpenTogether { apps, days_together, .. } => {
+                    Some((apps.into_iter().map(|app| app.app_name).collect(), days_together))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    const FIVE_DAYS: [u32; 5] = [8, 9, 10, 11, 14];
+
+    #[test]
+    fn programs_used_in_the_same_hour_on_five_days_suggest_a_routine() {
+        let conn = init_memory_db().unwrap();
+        used(&conn, "Code.exe", &FIVE_DAYS, 9);
+        used(&conn, "chrome.exe", &FIVE_DAYS, 9);
+        used(&conn, "WindowsTerminal.exe", &FIVE_DAYS, 9);
+        // Used on the same days, but never in the same hour.
+        used(&conn, "Spotify.exe", &FIVE_DAYS, 20);
+        // Always around, so never part of a workspace.
+        used(&conn, "explorer.exe", &FIVE_DAYS, 9);
+
+        assert_eq!(
+            together(&conn),
+            vec![(
+                vec![
+                    "chrome.exe".to_string(),
+                    "Code.exe".to_string(),
+                    "WindowsTerminal.exe".to_string()
+                ],
+                5
+            )]
+        );
+    }
+
+    #[test]
+    fn four_days_or_brief_use_is_not_enough() {
+        let conn = init_memory_db().unwrap();
+        used(&conn, "Code.exe", &[8, 9, 10, 11], 9);
+        used(&conn, "chrome.exe", &[8, 9, 10, 11], 9);
+        assert!(together(&conn).is_empty());
+
+        // A fifth day where one of them was only glanced at.
+        used(&conn, "Code.exe", &[14], 9);
+        app_usage::record(&conn, "2026-09-14", 9, "chrome.exe", Some(r"C:\chrome.exe"), 30).unwrap();
+        assert!(together(&conn).is_empty());
+    }
+
+    #[test]
+    fn a_group_a_routine_already_opens_is_not_suggested() {
+        let conn = init_memory_db().unwrap();
+        used(&conn, "Code.exe", &FIVE_DAYS, 9);
+        used(&conn, "chrome.exe", &FIVE_DAYS, 9);
+        assert_eq!(together(&conn).len(), 1);
+
+        conn.execute("INSERT INTO routines (id, name) VALUES (1, 'Coding')", []).unwrap();
+        conn.execute(
+            r"INSERT INTO routine_actions (routine_id, type, target, sort_order)
+              VALUES (1, 'application', 'C:\Program Files\Google\chrome.exe', 0),
+                     (1, 'application', 'code', 1)",
+            [],
+        )
+        .unwrap();
+        assert!(together(&conn).is_empty());
+    }
+
+    #[test]
+    fn a_dismissed_group_stays_gone() {
+        let conn = init_memory_db().unwrap();
+        used(&conn, "Code.exe", &FIVE_DAYS, 9);
+        used(&conn, "chrome.exe", &FIVE_DAYS, 9);
+
+        let key = suggestions(&conn)[0].key().to_owned();
+        assert_eq!(key, "open_together:chrome.exe+code.exe");
+        dismiss(&conn, &key).unwrap();
+        assert!(together(&conn).is_empty());
     }
 
     #[test]

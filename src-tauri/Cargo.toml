@@ -43,6 +43,13 @@ tauri-plugin-fs = "2"
 # the file is recoverable and mean it.
 trash = "5"
 sha2 = "0.10"
+# The sync folder's device id and the phone companion's pairing token come
+# from the OS random source.
+getrandom = "0.2"
+# Section 92 Tier 5's phone companion shows its pairing link as a QR code, so a
+# phone can open it without anyone typing a 64-character token. SVG only: no
+# image codecs.
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
@@ -50,8 +57,15 @@ tauri-plugin-global-shortcut = "2"
 # Section 85's update strategy. Desktop-only for the same reason its two
 # neighbours are: there is no `Run` key, no global accelerator and no
 # installer to replace on a phone. It brings its own HTTPS client, which is
-# the only network code in this process — see `services::updates` for what it
+# shared with the calendar feed below; those two are the only outbound network
+# code in this process — see `services::updates` for what it
 # is allowed to talk to and `services::logging` for the promise that survives
 # it.
 tauri-plugin-updater = "2"
+# Section 53 / 92's calendar feed: one `GET` for an `.ics` URL the user pasted,
+# and nothing else — see `services::calendar`. The same client, version and
+# TLS stack the updater already brings, so it adds no new crates, only this
+# second, equally narrow, use of them.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 

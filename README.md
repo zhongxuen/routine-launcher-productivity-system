@@ -4,8 +4,8 @@ A local-first Windows desktop app that combines a routine launcher, a daily task
 manager, a focus timer, and a light progress layer — so that planning, starting,
 working, completing, and tracking all live in one place.
 
-Full specification: `md-files/development-plan.md`.
-What is not built yet, and the prompt to build it: `remaining.md`.
+Full specification: `md-files/development-plan.md`. Every part of it is built,
+including §92's Tier 5 "Future" list — see [Progress](#progress).
 
 ---
 
@@ -115,6 +115,8 @@ app owns lives in one folder:
 %APPDATA%/com.zhongxuen.routinelauncher/
   app.db                The SQLite database
   logs/                 Rotating crash and error log (plan §85)
+  sync-safety/          This computer's data as it was before the last sync
+                        pull (plan §92), in the backup format
 ```
 
 The `@/` alias maps to `src/`.
@@ -716,7 +718,7 @@ succeeding.
 - Launch-at-startup writes the `HKCU` `Run` key through this app's own
   command; the `autostart` plugin permission is granted to no window, so a
   script in the main webview has no second route to it (plan §85, §86).
-- The updater is the only part of the app that opens a socket, and it is
+- The updater is one of two outbound network requests, and it is
   granted to no window either: `updater:default` is in no capability, so the
   check and the install go through `commands/updates.rs`. Both requests are
   bodyless `GET`s for static files — a manifest and an installer — and the
@@ -735,6 +737,30 @@ succeeding.
   action without editing any routine. The exact command line is echoed on the
   launch result whether it ran or not, and a small blocklist rejects obviously
   destructive commands both on save and again before running (plan §66).
+- The other outbound request is the calendar feed (plan §53, §92): one
+  bodyless `GET` of the `.ics` address the user pasted, capped at 10 MB, made
+  by `commands/calendar.rs` and never by a webview. Nothing is fetched until an
+  address is saved.
+- The phone companion (plan §92) is the only thing that *listens*, and only
+  while switched on in Settings. It answers private-network addresses only
+  (anything else is dropped unread), requires a 256-bit pairing token compared
+  in constant time, refuses a `Host` that is not an IP address (no DNS
+  rebinding) and sends no CORS headers. The token travels in the link's URL
+  fragment, which browsers never send. What a paired phone can do is today's
+  tasks — read, complete, reopen, add — and nothing else: no routines, no
+  commands, no files, no settings.
+- The sync folder (plan §92) is a file in a folder the user chose; the app
+  opens no connection for it. A pull never carries section 66's command
+  switch, widget geometry, shortcuts, calendar or usage history from another
+  computer,
+  saves this computer's data before replacing it, and never runs on its own
+  while a window is open.
+- Shared routine files import with every `command` action switched off,
+  whatever the file says, and every target is validated as the builder would
+  (plan §66).
+- Application usage (plan §37) is off by default and records only the
+  executable name and path of the foreground program, per hour. It never
+  reads window titles, and the usage table has no column that could hold one.
 
 ---
 
@@ -743,9 +769,9 @@ succeeding.
 Phase checklist mirroring `md-files/development-plan.md` §72–85 (build order in
 §93). This is the live status of the build — it is updated as work lands.
 
-All fourteen phases have been built, and every phase's `Build:` list is now
-checked. `md-files/remaining.md` carries what is left: the plan describes it,
-but no phase ever scheduled it.
+All fourteen phases have been built, every phase's `Build:` list is checked,
+and so is everything the plan describes outside them — the feature sections'
+extras and §92's Tier 5 "Future" list, at the end of this section.
 
 **Phase 1 — Foundation** ✅ complete
 
@@ -758,9 +784,11 @@ but no phase ever scheduled it.
 - [x] Desktop plugins installed and permissioned: notification,
       global-shortcut, autostart, dialog, fs, opener; `tray-icon` enabled
 
-Deferred to the phases that need them: the `app_usage` and
-`file_scan_history` tables, and the tray/shortcut/notification runtime wiring
-(the plugins are installed, but nothing registers handlers yet).
+Deferred to the phases that need them: the `app_usage` table (created by
+Tier 5's `0010_app_usage.sql`) and the tray/shortcut/notification runtime
+wiring. §57's `file_scan_history` was never needed — each cleanup scan reads
+the disk fresh, which is why a file deleted outside the app cannot leave a
+stale row — and §57 itself says not every table has to exist.
 
 **Phase 2 — Task System** ✅ complete
 
@@ -1656,12 +1684,10 @@ with no cache to keep honest.
       the launch line, omitted while both are zero rather than shown as a
       verdict on a routine just built
 
-Application usage (§37) is deliberately **not** built. The plan lists it as a
-"potential future feature", it needs the `app_usage` table `0001_init.sql`
-deferred, and §37 is explicit that time an application is open is not
-productive time. Shipping it here would have meant a panel arguing with the
-page around it; if it is built later it belongs under its own heading,
-labelled usage time. Left for a Tier 5 pass.
+Application usage (§37) was deliberately left out of this phase: §37 is
+explicit that time an application is open is not productive time, and a panel
+on this page would have argued with the page around it. It arrived with Tier 5
+under its own heading, Progress › App usage, labelled as usage time.
 
 **Phase 12 — Desktop Widget** ✅ complete
 
@@ -1927,6 +1953,71 @@ labelled usage time. Left for a Tier 5 pass.
       the two Windows error codes worth their own sentence (elevation
       required, and not a program at all)
 
+**Tier 5 — Future (§92)** ✅ complete
+
+The plan's own "Future" list, built without breaking §56 and §68's
+local-first promise: no account, no backend, no cloud database. Each feature
+is off until it is set up in Settings.
+
+- [x] Application usage tracking (§37) — `services/app_usage.rs`,
+      `0010_app_usage.sql`. A background sampler credits the foreground
+      program every 5 seconds, skipping idle time (5 minutes without input),
+      the lock screen and the Start menu, and writes per-hour totals once a
+      minute. 90 days are kept. Progress › App usage lists programs by time
+      over today, 7 or 30 days, with "usage time is not productivity time" as
+      its first line; nothing in XP, quests, streaks or Statistics reads it.
+      Settings › Application usage switches it on and deletes the history
+- [x] Rule-based productivity suggestions (§55) — the third rule, "you often
+      open these together": programs each used at least 2 minutes in the same
+      hour on 5 of the last 14 days, grown greedily up to 5, suggested as one
+      quiet line on Tasks › Today with Create routine. A group one routine
+      already launches is not suggested, and a dismissal is permanent. The
+      other two rules were B2
+- [x] Shared routine templates — `services/routine_share.rs`. A routine card's
+      *Share as file…* writes a readable `.routine.json` (no ids, no history);
+      Routines › Templates › *Import shared routine* reads it, lists every
+      action with commands marked as arriving switched off and paths missing
+      on this computer flagged, then creates the routine and opens the builder.
+      The file travels however the user sends files; there is no transport
+- [x] Cloud synchronization and cross-device synchronization —
+      `services/sync.rs`, Settings › Sync. Each computer points at the same
+      folder in OneDrive, Dropbox, Google Drive or a network share and reads
+      and writes one `routine-launcher-sync.json` there: §69's lossless backup
+      plus the device and a hash of the data. A snapshot, never a merge: each
+      device remembers the hash it last agreed on, so the card can say whether
+      this computer, the folder or both changed, and a conflict always waits
+      for the user. Pull goes through Import's validated one-transaction
+      restore after saving `sync-safety/before-pull.json`, and keeps
+      machine-specific rows (widget, shortcuts, archive folder, usage history,
+      the calendar, the command switch). A snapshot suits one computer at a
+      time; two open at once meet a conflict rather than a guess. Automatic sync pushes every 2 minutes, pulls at
+      start-up only when nothing here would be lost, and otherwise announces
+      newer data with a *Pull now* toast
+- [x] Calendar integration (§53) — `services/calendar.rs`,
+      `0011_calendar_events.sql`, Settings › Calendar. Events come from a
+      private `.ics` feed address (read on save, shortly after start-up and
+      every 6 hours) or an imported `.ics` file, expanded into local-time
+      occurrences a month back and a year ahead — `RRULE` daily, weekly,
+      monthly and yearly with `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (with
+      ordinals), `BYMONTHDAY` and `BYMONTH`, plus `EXDATE`, `RECURRENCE-ID`
+      overrides and cancelled events — and shown read-only as a CALENDAR group
+      on Tasks › Today for the day on screen. Times written in UTC are
+      converted with SQLite's own `localtime`; times with a `TZID` are taken as
+      local, which the card says. Open tasks with a due date export as an
+      `.ics` with stable UIDs. Read-only: nothing writes to a calendar, and no
+      event becomes a task
+- [x] Mobile companion application — `services/companion.rs`,
+      `companion_page.html`, Settings › Phone companion. When switched on, the
+      app serves one self-contained, installable web page to phones on the
+      same local network: today's tasks with their progress, tick one off or
+      reopen it, add one for today. Paired by scanning a QR code whose link
+      carries the token in its fragment; *Unpair all phones* issues a new one.
+      Writes go through `services::tasks`, so a tick from a phone earns and
+      counts exactly what a tick on the desktop does, and every window and the
+      tray refresh. See Security posture for how it is locked down
+- [x] Backups carry `app_usage` and `calendar_events`; the sync file leaves
+      both on their own computer
+
 ---
 
 ## Documentation convention
@@ -1936,5 +2027,4 @@ carries a checklist of its own scope, and those checklists are updated as part
 of the work they describe — not afterwards as a separate pass.
 
 - [x] `README.md` — phase checklist above
-- [x] `remaining.md` — its own checklist of what is not built
 - [ ] Future docs — add a checklist when the file is created

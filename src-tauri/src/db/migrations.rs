@@ -65,6 +65,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "0009_cleanup_actions",
         sql: include_str!("../../../database/migrations/0009_cleanup_actions.sql"),
     },
+    Migration {
+        version: 10,
+        name: "0010_app_usage",
+        sql: include_str!("../../../database/migrations/0010_app_usage.sql"),
+    },
+    Migration {
+        version: 11,
+        name: "0011_calendar_events",
+        sql: include_str!("../../../database/migrations/0011_calendar_events.sql"),
+    },
 ];
 
 /// Applies every migration this build carries that the database has not had

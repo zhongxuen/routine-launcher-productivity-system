@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#111827">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Routines">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>Routine Launcher</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --card: #ffffff; --text: #16181d; --muted: #5b6270;
+    --line: #e3e5ea; --accent: #2f5bea; --accent-text: #ffffff; --danger: #b42318;
+    --done: #1f7a4d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #181b21; --text: #eef0f4; --muted: #a3a9b6;
+      --line: #2a2e37; --accent: #7c9bff; --accent-text: #0f1115; --danger: #ff8a80;
+      --done: #6fd39f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+    max-width: 560px; margin: 0 auto;
+  }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 8px 0 16px; }
+  h1 { font-size: 13px; letter-spacing: .12em; color: var(--muted); margin: 0; font-weight: 600; }
+  #date { font-size: 22px; font-weight: 600; margin: 2px 0 0; }
+  #count { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  form { display: flex; gap: 8px; margin-bottom: 16px; }
+  input[type=text] {
+    flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+  }
+  button {
+    font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 12px 16px;
+    background: var(--accent); color: var(--accent-text); cursor: pointer;
+  }
+  button:disabled { opacity: .6; }
+  input:focus-visible, button:focus-visible, label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  ul { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  li + li { border-top: 1px solid var(--line); }
+  label { display: flex; align-items: center; gap: 12px; padding: 14px; cursor: pointer; }
+  input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--done); flex: none; margin: 0; }
+  .title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .done .title { color: var(--muted); text-decoration: line-through; }
+  .meta { color: var(--muted); font-size: 14px; white-space: nowrap; }
+  .overdue { color: var(--danger); }
+  .high::before, .urgent::before { content: "! "; color: var(--danger); font-weight: 700; }
+  #message { color: var(--muted); padding: 16px 4px; }
+  #message.error { color: var(--danger); }
+  footer { color: var(--muted); font-size: 13px; margin-top: 20px; }
+  @media (prefers-reduced-motion: no-preference) { li { transition: background-color .15s; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>TODAY</h1>
+    <p id="date">…</p>
+  </div>
+  <span id="count" aria-live="polite"></span>
+</header>
+
+<form id="add" autocomplete="off">
+  <input id="title" type="text" name="title" maxlength="200" placeholder="Add a task for today" aria-label="New task title" required>
+  <button type="submit">Add</button>
+</form>
+
+<ul id="tasks" aria-label="Today's tasks" hidden></ul>
+<p id="message" role="status">Loading…</p>
+
+<footer>Routine Launcher on your computer, over your local network. Keep this link private: it is the key to your task list.</footer>
+
+<script>
+(function () {
+  "use strict";
+  var KEY = "routine-launcher-companion-token";
+  var token = null;
+
+  var match = /(?:^#|&)t=([0-9a-f]{64})(?:&|$)/.exec(location.hash);
+  if (match) {
+    token = match[1];
+    try { localStorage.setItem(KEY, token); } catch (e) {}
+    // Take the key out of the address bar and history once it is stored.
+    try { history.replaceState(null, "", location.pathname); } catch (e) {}
+  } else {
+    try { token = localStorage.getItem(KEY); } catch (e) {}
+  }
+
+  var list = document.getElementById("tasks");
+  var message = document.getElementById("message");
+  var count = document.getElementById("count");
+  var dateEl = document.getElementById("date");
+  var form = document.getElementById("add");
+  var titleInput = document.getElementById("title");
+
+  function show(text, isError) {
+    message.textContent = text;
+    message.className = isError ? "error" : "";
+    message.hidden = !text;
+  }
+
+  function call(method, path, body) {
+    if (!token) {
+      return Promise.reject({ status: 401 });
+    }
+    var options = { method: method, headers: { "Authorization": "Bearer " + token }, cache: "no-store" };
+    if (body !== undefined) {
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(body);
+    }
+    return fetch(path, options).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (data) {
+        if (!response.ok) { throw { status: response.status, message: data.error }; }
+        return data;
+      });
+    });
+  }
+
+  function explain(error) {
+    if (error && error.status === 401) {
+      return "This phone is not paired. On your computer, open Settings › Phone companion and scan the code again.";
+    }
+    if (error && error.message) { return error.message; }
+    return "Can't reach your computer. Check that Routine Launcher is running and that this phone is on the same Wi-Fi.";
+  }
+
+  function formatDate(key) {
+    var parts = key.split("-");
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+  }
+
+  function render(today) {
+    dateEl.textContent = formatDate(today.date);
+    count.textContent = today.completed + " / " + today.total + " done";
+    list.textContent = "";
+
+    today.tasks.forEach(function (task) {
+      var li = document.createElement("li");
+      if (task.completed) { li.className = "done"; }
+
+      var label = document.createElement("label");
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = task.completed;
+      box.addEventListener("change", function () {
+        box.disabled = true;
+        call("POST", "/api/tasks/" + task.id + (box.checked ? "/complete" : "/reopen"))
+          .then(load)
+          .catch(function (error) { box.checked = !box.checked; box.disabled = false; show(explain(error), true); });
+      });
+
+      var title = document.createElement("span");
+      title.className = "title " + task.priority;
+      title.textContent = task.title;
+
+      label.appendChild(box);
+      label.appendChild(title);
+
+      if (task.overdue || task.dueTime) {
+        var meta = document.createElement("span");
+        meta.className = "meta" + (task.overdue ? " overdue" : "");
+        meta.textContent = task.overdue ? "Overdue" : task.dueTime;
+        label.appendChild(meta);
+      }
+
+      li.appendChild(label);
+      list.appendChild(li);
+    });
+
+    list.hidden = today.tasks.length === 0;
+    show(today.tasks.length === 0 ? "Nothing scheduled for today." : "", false);
+  }
+
+  function load() {
+    return call("GET", "/api/today").then(render).catch(function (error) {
+      list.hidden = true;
+      count.textContent = "";
+      show(explain(error), true);
+    });
+  }
+
+  form.addEventListener("submit", function (event) {
+    event.preventDefault();
+    var value = titleInput.value.trim();
+    if (!value) { return; }
+    var button = form.querySelector("button");
+    button.disabled = true;
+    call("POST", "/api/tasks", { title: value })
+      .then(function () { titleInput.value = ""; return load(); })
+      .catch(function (error) { show(explain(error), true); })
+      .then(function () { button.disabled = false; });
+  });
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") { load(); }
+  });
+  setInterval(function () { if (document.visibilityState === "visible") { load(); } }, 30000);
+
+  load();
+})();
+</script>
+</body>
+</html>

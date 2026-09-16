@@ -5,8 +5,11 @@
 
 pub mod analytics;
 pub mod app_info;
+pub mod app_usage;
 pub mod backup;
+pub mod calendar;
 pub mod cleanup_actions;
+pub mod companion;
 pub mod daily_plans;
 pub mod desktop;
 pub mod diagnostics;
@@ -20,11 +23,13 @@ pub mod notification;
 pub mod onboarding;
 pub mod popup;
 pub mod quick_launcher;
+pub mod routine_share;
 pub mod routines;
 pub mod screenshots;
 pub mod settings;
 pub mod storage;
 pub mod suggestions;
+pub mod sync;
 pub mod task_categories;
 pub mod task_recurrence;
 pub mod tasks;

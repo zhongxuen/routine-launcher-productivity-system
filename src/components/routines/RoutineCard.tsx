@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BarChart3, Check, MoreHorizontal, Pencil, Play, Trash2 } from "lucide-react";
+import { BarChart3, Check, MoreHorizontal, Pencil, Play, Share2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { actionLabel, actionSummary, formatFocusTime, formatLastUsed } from "@/lib/routine-utils";
 import { cn } from "@/lib/utils";
+import { exportRoutine, pickRoutineDestination } from "@/services/tier5Service";
 import { useRoutineStore } from "@/stores/routineStore";
 import type { RoutineWithActions } from "@/types/routine";
 
@@ -66,6 +67,20 @@ function RoutineCard({ routine }: RoutineCardProps) {
 
   const hasActions = routine.actions.some((action) => action.enabled);
 
+  /** Section 92's shared templates: the routine as a file, sent however the user likes. */
+  async function handleShare() {
+    try {
+      const path = await pickRoutineDestination(routine.id);
+      if (!path) return;
+      await exportRoutine(routine.id, path);
+      toast.success("Routine saved to share", {
+        description: `${path}. Anyone with Routine Launcher can import it from Routines › Templates.`,
+      });
+    } catch (cause) {
+      toast.error("Could not save the routine", { description: String(cause) });
+    }
+  }
+
   async function handleDelete() {
     setIsDeleting(true);
     try {
@@ -105,6 +120,10 @@ function RoutineCard({ routine }: RoutineCardProps) {
             <DropdownMenuItem onSelect={() => openStatistics(routine.id)}>
               <BarChart3 />
               Statistics
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void handleShare()}>
+              <Share2 />
+              Share as file…
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => setIsConfirmingDelete(true)}>

@@ -9,6 +9,7 @@ import { useLauncherRequests } from "@/hooks/useLauncherRequests";
 import { useProgressSync } from "@/hooks/useProgressSync";
 import { useQuickAddShortcut } from "@/hooks/useQuickAddShortcut";
 import { useReminderPrompts } from "@/hooks/useReminderPrompts";
+import { useSyncAttention } from "@/hooks/useSyncAttention";
 import { useTrayActions } from "@/hooks/useTrayActions";
 import { useUpdateCheck } from "@/hooks/useUpdateCheck";
 import { useWindowSync } from "@/hooks/useWindowSync";
@@ -71,6 +72,10 @@ import Sidebar from "./Sidebar";
  * whichever page those happen to be, so the one read at launch belongs to the
  * window. See `useDailySettings`.
  *
+ * The ninth is section 92's sync folder. Automatic sync pushes on its own, but
+ * newer data from another computer, or a conflict, is the user's call and can
+ * arrive on any page. `useSyncAttention` says so and offers the pull.
+ *
  * **The shell is where section 84's responsive layouts are decided.** The
  * window can be dragged down to 680x560 (`tauri.conf.json`), which is half a
  * screen on a 1366-wide laptop — the width at which somebody actually works
@@ -99,6 +104,7 @@ function AppLayout() {
   useUpdateCheck();
   useQuickAddShortcut();
   useDailySettings();
+  useSyncAttention();
 
   return (
     <div className="flex h-full w-full overflow-hidden">

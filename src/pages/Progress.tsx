@@ -7,6 +7,9 @@ const SUB_NAV_ITEMS = [
   { to: "/progress/statistics", label: "Statistics" },
   { to: "/progress/achievements", label: "Achievements" },
   { to: "/progress/streak", label: "Streak" },
+  // Section 37: kept last and named as usage, apart from the three views of
+  // progress, because usage time is not productivity time.
+  { to: "/progress/app-usage", label: "App usage" },
 ];
 
 /**

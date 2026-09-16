@@ -11,8 +11,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import AboutCard from "@/components/settings/AboutCard";
+import AppUsageCard from "@/components/settings/AppUsageCard";
+import CalendarCard from "@/components/settings/CalendarCard";
 import CloseToTrayCard from "@/components/settings/CloseToTrayCard";
 import CommandActionsCard from "@/components/settings/CommandActionsCard";
+import CompanionCard from "@/components/settings/CompanionCard";
 import DailySettingsCard from "@/components/settings/DailySettingsCard";
 import DataCard from "@/components/settings/DataCard";
 import DesktopWidgetCard from "@/components/settings/DesktopWidgetCard";
@@ -20,6 +23,7 @@ import DiagnosticsCard from "@/components/settings/DiagnosticsCard";
 import MotionSoundCard from "@/components/settings/MotionSoundCard";
 import QuickLauncherCard from "@/components/settings/QuickLauncherCard";
 import StartupCard from "@/components/settings/StartupCard";
+import SyncCard from "@/components/settings/SyncCard";
 import TaskCategoriesCard from "@/components/settings/TaskCategoriesCard";
 import UpdatesCard from "@/components/settings/UpdatesCard";
 import WalkthroughCard from "@/components/settings/WalkthroughCard";
@@ -168,6 +172,15 @@ function Settings() {
 
       <WalkthroughCard />
 
+      {/* Section 92's Tier 5 connections, together: each reaches past this
+          window — to a calendar, to a phone on the same Wi-Fi, to the
+          programs in front of you — and each is off until set up here. */}
+      <CalendarCard />
+
+      <CompanionCard />
+
+      <AppUsageCard />
+
       {/* Section 13's categories. The first card about what the app holds
           rather than how it behaves, so it opens that half of the page —
           directly above Data, which is the rest of it. */}
@@ -180,6 +193,11 @@ function Settings() {
           something, so they sit at the end rather than in the middle of the
           switches. */}
       <DataCard />
+
+      {/* Section 92's sync folder, directly under Data because it is the
+          same file carried between computers: a pull is an import, a push an
+          export, done for you. */}
+      <SyncCard />
 
       {/* Section 85's update strategy. Below Data on purpose: an update
           replaces the program and leaves the database alone, and the card

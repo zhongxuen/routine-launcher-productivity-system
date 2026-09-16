@@ -148,7 +148,26 @@
 //! keeps. Like `analytics` it owns no table and writes no task. It describes
 //! a change, and the frontend makes it through the task commands on a click.
 //! The one thing it stores is a declined suggestion, as a `settings` key per
-//! title, so that suggestion does not come back.
+//! title, so that suggestion does not come back. Its third rule, "you often
+//! open these together", reads `app_usage`.
+//!
+//! The rest are section 92's Tier 5, and each is off until the user sets it
+//! up in Settings:
+//!
+//! * `app_usage` is section 37's usage tracking: a background sampler of the
+//!   foreground program, per hour, never read by anything that pays XP.
+//! * `routine_share` writes a routine to a shareable file and imports one
+//!   back, with commands switched off.
+//! * `sync` carries section 69's backup between computers through a folder
+//!   the user already syncs, as a snapshot with change detection rather than a
+//!   merge. It reuses `backup`'s snapshot and restore.
+//! * `calendar` reads iCalendar files and feeds into `calendar_events` and
+//!   exports tasks as one. Its single network request is made by
+//!   `commands/calendar.rs`.
+//! * `companion` is the phone companion: a small local-network HTTP server
+//!   over `tasks`, locked to private addresses and a pairing token.
+//! * `random` gives `sync` its device id and `companion` its pairing token,
+//!   from the OS generator.
 //!
 //! `startup` is section 85's launch-at-Windows-startup, and the only service
 //! whose state lives outside this app entirely — in the `Run` key of the
@@ -209,8 +228,11 @@
 //! rebuilt on request.
 
 pub mod analytics;
+pub mod app_usage;
 pub mod backup;
+pub mod calendar;
 pub mod cleanup_actions;
+pub mod companion;
 pub mod daily_plans;
 pub mod desktop;
 pub mod downloads;
@@ -227,8 +249,10 @@ pub mod onboarding;
 pub mod popup;
 pub mod quests;
 pub mod quick_launcher;
+pub mod random;
 pub mod reminders;
 pub mod routine_exec;
+pub mod routine_share;
 pub mod routines;
 pub mod screenshots;
 pub mod serde_util;
@@ -237,6 +261,7 @@ pub mod shortcuts;
 pub mod startup;
 pub mod storage;
 pub mod suggestions;
+pub mod sync;
 pub mod task_categories;
 pub mod task_recurrence;
 pub mod tasks;

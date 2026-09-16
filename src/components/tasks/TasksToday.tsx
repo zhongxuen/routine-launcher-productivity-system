@@ -14,6 +14,7 @@ import {
 } from "@/lib/task-utils";
 import { useTaskStore } from "@/stores/taskStore";
 
+import CalendarEventsSection from "./CalendarEventsSection";
 import DayNav from "./DayNav";
 import PlanToday from "./PlanToday";
 import RepeatsSection from "./RepeatsSection";
@@ -68,8 +69,13 @@ function emptyCopy(offset: number, heading: string): { title: string; hint?: str
  * day being worked through, and a past day's picks are history rather than
  * something to act on.
  *
- * Section 55's suggestions ("Make it recurring?", "Update the estimate?") sit
- * as one quiet line under the heading, on today's page only.
+ * Section 55's suggestions ("Make it recurring?", "Update the estimate?",
+ * "You often open these together") sit as one quiet line under the heading,
+ * on today's page only.
+ *
+ * Any day with events in a connected calendar (section 92's calendar
+ * integration, set up in Settings) lists them read-only above the tasks, so
+ * the time a meeting takes is in view while the day is planned around it.
  */
 function TasksToday() {
   const { date, dayKey, step, goToToday } = useDayParam();
@@ -118,6 +124,8 @@ function TasksToday() {
       {isToday && (
         <PlanToday tasks={tasks} tasksLoading={isLoading} tasksError={error} plan={plan} />
       )}
+
+      <CalendarEventsSection dayKey={dayKey} />
 
       <TaskViewBody
         isLoading={isLoading}

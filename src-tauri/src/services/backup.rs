@@ -111,6 +111,9 @@ pub const BACKUP_FORMAT_VERSION: i64 = 1;
 /// without the unlock, a streak that has to be recomputed from a history that
 /// was not carried. `cleanup_actions` is the same: without it, Organized's
 /// day count and today's cleanup quest would restart from nothing.
+/// `app_usage` and `calendar_events` are Tier 5's (section 92): the usage
+/// history is the user's own record, and the calendar copy is what Tasks >
+/// Today shows beside the day until the next import replaces it.
 const BACKUP_TABLES: &[&str] = &[
     "settings",
     "task_categories",
@@ -128,6 +131,8 @@ const BACKUP_TABLES: &[&str] = &[
     "streaks",
     "routine_launches",
     "cleanup_actions",
+    "app_usage",
+    "calendar_events",
 ];
 
 /// One backup file, deserialized.
@@ -224,7 +229,10 @@ pub fn export_to_file(conn: &Connection, app_version: &str, path: &str) -> Servi
 }
 
 /// Reads every backed-up table into an in-memory [`Backup`].
-fn snapshot(conn: &Connection, app_version: &str) -> ServiceResult<Backup> {
+///
+/// Also what the sync folder writes (`services::sync`), which trims a few
+/// device-local rows out of it first.
+pub(crate) fn snapshot(conn: &Connection, app_version: &str) -> ServiceResult<Backup> {
     let mut tables = BTreeMap::new();
 
     for table in BACKUP_TABLES {
@@ -289,8 +297,17 @@ pub fn inspect_file(conn: &Connection, path: &str) -> ServiceResult<BackupInfo> 
 /// actually landed rather than repeating what was promised.
 pub fn import_from_file(conn: &mut Connection, path: &str) -> ServiceResult<BackupInfo> {
     let backup = read_file(path)?;
-    let plan = plan_restore(conn, &backup)?;
-    let info = describe(path, &backup);
+    restore(conn, &backup)?;
+    Ok(describe(path, &backup))
+}
+
+/// Replaces the entire database with `backup`, all or nothing.
+///
+/// [`import_from_file`] without the file: the sync folder's pull
+/// (`services::sync`) has already read and adjusted its snapshot, and restores
+/// it through exactly the same validation and transaction.
+pub(crate) fn restore(conn: &mut Connection, backup: &Backup) -> ServiceResult<()> {
+    let plan = plan_restore(conn, backup)?;
 
     let tx = conn.transaction()?;
 
@@ -345,7 +362,7 @@ pub fn import_from_file(conn: &mut Connection, path: &str) -> ServiceResult<Back
         ))
     })?;
 
-    Ok(info)
+    Ok(())
 }
 
 /// One table's rows, resolved into the exact columns and values that will be
@@ -472,7 +489,7 @@ fn validate(conn: &Connection, backup: &Backup) -> ServiceResult<()> {
 }
 
 /// Parses a backup file, saying which of the two things went wrong.
-fn read_file(path: &str) -> ServiceResult<Backup> {
+pub(crate) fn read_file(path: &str) -> ServiceResult<Backup> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| ServiceError::validation(format!("Could not read {path}: {e}")))?;
 
@@ -693,7 +710,16 @@ mod tests {
              -- two different local days in every timezone the tests run in.
              INSERT INTO cleanup_actions (utility, action, item_count, created_at)
              VALUES ('downloads', 'move', 12, '2026-01-03 12:00:00'),
-                    ('screenshots', 'organize', 40, '2026-01-06 12:00:00');",
+                    ('screenshots', 'organize', 40, '2026-01-06 12:00:00');
+
+             -- Migrations 0010 and 0011's.
+             INSERT INTO app_usage (date, hour, app_name, exe_path, seconds)
+             VALUES ('2026-01-06', 9, 'Code.exe', 'C:/Code/Code.exe', 1800);
+
+             INSERT INTO calendar_events (source, uid, title, location, date, start_time,
+                                          end_time, all_day)
+             VALUES ('feed', 'standup@example.test', 'Stand-up', 'Room 2', '2026-01-06',
+                     '09:30', '09:45', 0);",
         )
         .unwrap();
     }

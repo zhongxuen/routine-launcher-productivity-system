@@ -9,6 +9,7 @@ import { actionLabel } from "@/lib/routine-utils";
 import { ROUTINE_TEMPLATES, type RoutineTemplate } from "@/lib/routine-templates";
 import { useRoutineStore } from "@/stores/routineStore";
 
+import ImportRoutineButton from "./ImportRoutineButton";
 import RoutineIcon from "./RoutineIcon";
 
 /**
@@ -36,13 +37,16 @@ function RoutineTemplates() {
 
   return (
     <div className="flex flex-col gap-5">
-      <header className="flex flex-col gap-0.5">
-        <p className="text-xs font-medium tracking-widest text-muted-foreground">TEMPLATES</p>
-        <p className="text-sm text-muted-foreground">
-          Starting points, not fixed recipes. Adding one creates an ordinary routine you can
-          rename, reorder and re-target — check the apps point at where they live on this
-          machine before the first launch.
-        </p>
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex max-w-xl flex-col gap-0.5">
+          <p className="text-xs font-medium tracking-widest text-muted-foreground">TEMPLATES</p>
+          <p className="text-sm text-muted-foreground">
+            Starting points, not fixed recipes. Adding one creates an ordinary routine you can
+            rename, reorder and re-target — check the apps point at where they live on this
+            machine before the first launch. Someone shared a routine with you? Import its file.
+          </p>
+        </div>
+        <ImportRoutineButton />
       </header>
 
       <div className="grid gap-4 md:grid-cols-2">

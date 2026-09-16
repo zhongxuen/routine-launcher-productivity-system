@@ -32,6 +32,7 @@ import CleanupStorage from "./components/cleanup/CleanupStorage";
 import ProgressStatistics from "./components/progress/ProgressStatistics";
 import ProgressAchievements from "./components/progress/ProgressAchievements";
 import ProgressStreak from "./components/progress/ProgressStreak";
+import ProgressAppUsage from "./components/progress/ProgressAppUsage";
 
 /**
  * Top-level route tree, matching development-plan.md section 64.
@@ -96,6 +97,7 @@ export const routes: RouteObject[] = [
           { path: "statistics", element: <ProgressStatistics /> },
           { path: "achievements", element: <ProgressAchievements /> },
           { path: "streak", element: <ProgressStreak /> },
+          { path: "app-usage", element: <ProgressAppUsage /> },
         ],
       },
       { path: "settings", element: <Settings /> },
