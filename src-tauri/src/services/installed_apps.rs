@@ -141,6 +141,42 @@ pub fn resolve(target: &str) -> Option<PathBuf> {
     best_match(&list(true), target)
 }
 
+/// Groups of names that all mean one program — `vscode`, `code` and
+/// `Visual Studio Code`; `files` and `File Explorer`. The same file the
+/// builder's picker reads (`src/lib/installed-app-utils.ts`), so the two agree
+/// on what a nickname means.
+const ALIAS_GROUPS_JSON: &str = include_str!("../../../src/lib/app-aliases.json");
+
+static ALIAS_GROUPS: OnceLock<Vec<Vec<String>>> = OnceLock::new();
+
+fn alias_groups() -> &'static [Vec<String>] {
+    ALIAS_GROUPS.get_or_init(|| {
+        let groups: Vec<Vec<String>> =
+            serde_json::from_str(ALIAS_GROUPS_JSON).expect("app-aliases.json is valid");
+        groups
+            .into_iter()
+            .map(|group| group.iter().map(|alias| normalise(alias)).collect())
+            .collect()
+    })
+}
+
+/// The group `query` is one of the names in, and every name in groups it is
+/// the start of (`vsc` is on its way to `vscode`).
+fn aliases_for(query: &str) -> (Option<&'static [String]>, Vec<&'static str>) {
+    let mut exact = None;
+    let mut partial = Vec::new();
+
+    for group in alias_groups() {
+        if group.iter().any(|alias| alias == query) {
+            exact = Some(group.as_slice());
+        } else if group.iter().any(|alias| alias.starts_with(query)) {
+            partial.extend(group.iter().map(String::as_str));
+        }
+    }
+
+    (exact, partial)
+}
+
 /// The best entry for `query`, by how directly it was named.
 ///
 /// The tiers matter more than the scoring: an exact name and a program whose
@@ -149,31 +185,47 @@ pub fn resolve(target: &str) -> Option<PathBuf> {
 /// exists. Within a tier the shortest name wins, which is the same rule by a
 /// different route — the shortest match is the least-qualified one, and a
 /// user who types a bare word means the bare thing.
+///
+/// A known nickname comes first of all: the table exists because `files`
+/// means File Explorer even on a machine that also has an app called "Files".
+/// Inside a group the earlier name wins, so `explorer` finds File Explorer
+/// rather than whatever else answers to another name in its group.
 fn best_match(apps: &[InstalledApp], query: &str) -> Option<PathBuf> {
     let query = normalise(&without_executable_extension(query.trim()));
     if query.is_empty() {
         return None;
     }
 
+    let (exact, partial) = aliases_for(&query);
+
     apps.iter()
         .filter_map(|app| {
             let name = normalise(&app.name);
             let stem = normalise(&file_stem(&app.target));
+            let alias_rank = exact.and_then(|group| {
+                group.iter().position(|alias| *alias == name || *alias == stem)
+            });
 
-            let tier = if name == query || stem == query {
-                0
-            } else if name.starts_with(&query) || stem.starts_with(&query) {
-                1
+            let (tier, rank) = if let Some(rank) = alias_rank {
+                (0, rank)
+            } else if name == query || stem == query {
+                (1, 0)
+            } else if name.starts_with(&query)
+                || stem.starts_with(&query)
+                || partial.contains(&name.as_str())
+                || partial.contains(&stem.as_str())
+            {
+                (2, 0)
             } else if name.contains(&query) {
-                2
+                (3, 0)
             } else {
                 return None;
             };
 
-            Some((tier, app.name.len(), app))
+            Some((tier, rank, app.name.len(), app))
         })
-        .min_by_key(|(tier, length, app)| (*tier, *length, app.name.clone()))
-        .map(|(_, _, app)| PathBuf::from(&app.target))
+        .min_by_key(|(tier, rank, length, app)| (*tier, *rank, *length, app.name.clone()))
+        .map(|(_, _, _, app)| PathBuf::from(&app.target))
 }
 
 /// Lowercases and drops everything that is not a letter or a digit, so
@@ -696,7 +748,57 @@ mod tests {
             app("Spotify", r"C:\Users\me\AppData\Roaming\Spotify\Spotify.exe"),
             app("Visual Studio Code", r"C:\Program Files\VS Code\Code.exe"),
             app("Opera", r"C:\Program Files\Opera\launcher.exe"),
+            app("Code::Blocks", r"C:\Program Files\CodeBlocks\codeblocks.exe"),
+            app("File Explorer", r"C:\Windows\explorer.exe"),
+            app("Microsoft Teams (work or school)", r"C:\Program Files\WindowsApps\ms-teams.exe"),
+            app("Claude", r"C:\Users\me\AppData\Local\AnthropicClaude\claude.exe"),
         ]
+    }
+
+    #[test]
+    fn nicknames_open_the_program_they_mean() {
+        for (typed, expected) in [
+            ("vscode", r"C:\Program Files\VS Code\Code.exe"),
+            ("VS Code", r"C:\Program Files\VS Code\Code.exe"),
+            ("code", r"C:\Program Files\VS Code\Code.exe"),
+            ("files", r"C:\Windows\explorer.exe"),
+            ("teams", r"C:\Program Files\WindowsApps\ms-teams.exe"),
+            ("MS Teams", r"C:\Program Files\WindowsApps\ms-teams.exe"),
+            ("claude ai", r"C:\Users\me\AppData\Local\AnthropicClaude\claude.exe"),
+            ("opera browser", r"C:\Program Files\Opera\launcher.exe"),
+        ] {
+            assert_eq!(
+                best_match(&catalog(), typed),
+                Some(PathBuf::from(expected)),
+                "{typed} should have matched"
+            );
+        }
+    }
+
+    #[test]
+    fn a_nickname_means_its_program_even_when_another_app_has_that_name() {
+        // Microsoft 365 Companions ships an app literally called "Files".
+        let mut apps = catalog();
+        apps.push(app("Files", r"shell:AppsFolder\Microsoft.M365Companions!Files"));
+        for typed in ["files", "explorer"] {
+            assert_eq!(
+                best_match(&apps, typed),
+                Some(PathBuf::from(r"C:\Windows\explorer.exe")),
+                "{typed} should have matched File Explorer"
+            );
+        }
+    }
+
+    #[test]
+    fn every_alias_names_one_program() {
+        let mut seen = std::collections::HashSet::new();
+        for group in alias_groups() {
+            assert!(group.len() >= 2, "{group:?} has no nicknames");
+            for alias in group {
+                assert!(!alias.is_empty(), "{group:?} has an empty name");
+                assert!(seen.insert(alias.clone()), "{alias} is in more than one group");
+            }
+        }
     }
 
     #[test]
@@ -758,7 +860,7 @@ mod tests {
         for app in apps.iter().take(40) {
             println!("  {:<40} {}", app.name, app.target);
         }
-        for name in ["chrome", "spotify", "opera", "code", "notepad"] {
+        for name in ["chrome", "spotify", "opera", "code", "vscode", "files", "teams", "claude", "explorer", "file explorer", "notepad"] {
             println!("{name} -> {:?}", resolve(name));
         }
         assert!(!apps.is_empty(), "a Windows install has programs on it");

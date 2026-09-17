@@ -27,6 +27,7 @@ import {
 } from "@/types/routine";
 
 import ApplicationPicker from "./ApplicationPicker";
+import WebsitePicker from "./WebsitePicker";
 
 /**
  * One action while it is being edited.
@@ -163,6 +164,14 @@ function RoutineActionRow({
           </Label>
           {action.type === "application" ? (
             <ApplicationPicker
+              id={targetId}
+              value={action.target}
+              invalid={error !== null}
+              label={`action ${index + 1}`}
+              onChange={(target) => onChange({ target })}
+            />
+          ) : action.type === "url" ? (
+            <WebsitePicker
               id={targetId}
               value={action.target}
               invalid={error !== null}

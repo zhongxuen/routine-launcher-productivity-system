@@ -12,6 +12,8 @@
 
 import type { InstalledApp } from "@/types/installed-app";
 
+import aliasGroups from "./app-aliases.json";
+
 /**
  * Lowercases and drops everything that is not a letter or a digit, so
  * `Visual Studio Code`, `visualstudiocode` and `Visual-Studio-Code` are one
@@ -58,6 +60,30 @@ export function installedAppFor(apps: InstalledApp[], target: string): Installed
 }
 
 /**
+ * Groups of names that all mean one program — `vscode`, `code` and
+ * `Visual Studio Code`; `files` and `File Explorer`. Shared with the backend
+ * (`installed_apps.rs` includes the same file) so the picker and the launch
+ * agree on what a nickname means.
+ */
+const ALIAS_GROUPS: string[][] = aliasGroups.map((group) => group.map(normaliseAppName));
+
+/**
+ * The group `wanted` is one of the names in, and every name in groups it is
+ * the start of (`vsc` is on its way to `vscode`).
+ */
+function appAliasesFor(wanted: string): { exact: string[] | null; partial: Set<string> } {
+  let exact: string[] | null = null;
+  const partial = new Set<string>();
+
+  for (const group of ALIAS_GROUPS) {
+    if (group.includes(wanted)) exact = group;
+    else if (group.some((alias) => alias.startsWith(wanted))) group.forEach((alias) => partial.add(alias));
+  }
+
+  return { exact, partial };
+}
+
+/**
  * The programs matching what the user has typed, best first.
  *
  * The tiers are the point, not the ordering inside them: a program *called*
@@ -65,6 +91,10 @@ export function installedAppFor(apps: InstalledApp[], target: string): Installed
  * letters, so `chrome` offers "Google Chrome" before "Chrome Remote Desktop"
  * however the list happened to be sorted. Within a tier the shortest name
  * wins — the least-qualified name is the one a bare word usually means.
+ *
+ * A known nickname comes first of all: `files` means File Explorer even on a
+ * machine that also has an app called "Files", and inside a group the earlier
+ * name wins.
  *
  * An empty query lists everything, which is how the dropdown answers "show me
  * what I have" for a user who does not know what to type.
@@ -78,27 +108,36 @@ export function matchInstalledApps(
 
   if (!wanted) return apps.slice(0, limit);
 
-  const ranked: { tier: number; app: InstalledApp }[] = [];
+  const aliases = appAliasesFor(wanted);
+  const ranked: { tier: number; rank: number; app: InstalledApp }[] = [];
 
   for (const app of apps) {
     const name = normaliseAppName(app.name);
     const stem = normaliseAppName(fileStem(app.target));
+    const aliasRank =
+      aliases.exact?.findIndex((alias) => alias === name || alias === stem) ?? -1;
 
     const tier =
-      name === wanted || stem === wanted
+      aliasRank >= 0
         ? 0
-        : name.startsWith(wanted) || stem.startsWith(wanted)
+        : name === wanted || stem === wanted
           ? 1
-          : name.includes(wanted)
+          : name.startsWith(wanted) ||
+              stem.startsWith(wanted) ||
+              aliases.partial.has(name) ||
+              aliases.partial.has(stem)
             ? 2
-            : -1;
+            : name.includes(wanted)
+              ? 3
+              : -1;
 
-    if (tier >= 0) ranked.push({ tier, app });
+    if (tier >= 0) ranked.push({ tier, rank: Math.max(aliasRank, 0), app });
   }
 
   ranked.sort(
     (a, b) =>
       a.tier - b.tier ||
+      a.rank - b.rank ||
       a.app.name.length - b.app.name.length ||
       a.app.name.localeCompare(b.app.name),
   );
